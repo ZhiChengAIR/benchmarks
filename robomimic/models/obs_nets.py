@@ -19,9 +19,21 @@ from robomimic.utils.python_utils import extract_class_init_kwargs_from_dict
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.lang_utils as LangUtils
-from robomimic.models.base_nets import Module, Sequential, MLP, RNN_Base, ResNet18Conv, SpatialSoftmax, \
+from robomimic.models.base_nets import (
+    Module,
+    Sequential,
+    MLP,
+    RNN_Base,
+    ResNet18Conv,
+    SpatialSoftmax,
     FeatureAggregator
-from robomimic.models.obs_core import VisualCore, Randomizer, VisualCoreLanguageConditioned
+)
+from robomimic.models.obs_core import (
+    VisualCore,
+    Randomizer,
+    VisualCoreLanguageConditioned,
+    LowDimCore
+)
 from robomimic.models.transformers import PositionalEncoding, GPT_Backbone
 
 
@@ -120,7 +132,13 @@ class ObservationTokeniser(Module):
     Call @register_obs_key to register observation keys with the encoder and then
     finally call @make to create the encoder networks.
     """
-    def __init__(self, feature_activation=nn.ReLU):
+
+    def __init__(
+        self,
+        output_dim: int,
+        dropout: float,
+        feature_activation: nn.Module = nn.ReLU
+    ):
         """
         Args:
             feature_activation: non-linearity to apply after each obs net - defaults to ReLU. Pass
@@ -135,6 +153,9 @@ class ObservationTokeniser(Module):
         self.obs_randomizers = nn.ModuleDict()
         self.feature_activation = feature_activation
         self._locked = False
+        self.lowdim_shape_dict = OrderedDict()
+        self.output_dim = output_dim
+        self.dropout = dropout
 
     def register_obs_key(
         self,
@@ -196,6 +217,9 @@ class ObservationTokeniser(Module):
         self.obs_randomizers[name] = nn.ModuleList(randomizers)
         self.obs_share_mods[name] = share_net_from
 
+        if ObsUtils.OBS_KEYS_TO_MODALITIES[name] == "low_dim":
+            self.lowdim_shape_dict[name] = net_kwargs["input_shape"]
+
     def make(self):
         """
         Creates the encoder networks and locks the encoder so that more modalities cannot be added.
@@ -217,6 +241,12 @@ class ObservationTokeniser(Module):
             elif self.obs_share_mods[k] is not None:
                 # make sure net is shared with another modality
                 self.obs_nets[k] = self.obs_nets[self.obs_share_mods[k]]
+
+        self.lowdim_tokeniser = LowDimCore(
+            lowdim_shape_dict=self.lowdim_shape_dict,
+            output_dim=self.output_dim,
+            dropout=self.dropout
+        )
 
         self.activation = None
         if self.feature_activation is not None:

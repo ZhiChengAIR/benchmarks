@@ -194,20 +194,19 @@ class LowDimCore(EncoderCore):
 
     def __init__(
         self,
-        lowdim_input_dict: Dict,
-        hidden_dim: int,
+        lowdim_shape_dict: Dict,
         output_dim: int,
         dropout: int
     ):
-        self.input_dict = lowdim_input_dict
+        self.input_dict = lowdim_shape_dict
         self.input_shape = sum(
-            input["input_dim"] for input in lowdim_input_dict.values()
+            input["input_dim"] for input in lowdim_shape_dict.values()
         )
         def approx_gelu(): return nn.GELU(approximate="tanh")
         self.lowdim_encoder = MLP(
             input_dim=self.input_shape,
             output_dim=output_dim,
-            layer_dims=[hidden_dim],
+            layer_dims=[output_dim],
             activation=approx_gelu,
             dropouts=[dropout],
             normalization=True,
