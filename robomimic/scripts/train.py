@@ -12,18 +12,18 @@ Args:
 
     dataset (str): if provided, override the dataset path defined in the config
 
-    debug (bool): set this flag to run a quick training run for debugging purposes    
+    debug (bool): set this flag to run a quick training run for debugging purposes
 """
+import os
+os.environ["MUJOCO_GL"] = "egl"
 
 import argparse
 import json
 import numpy as np
 import time
-import os
 import shutil
 import psutil
 import sys
-import socket
 import traceback
 
 from collections import OrderedDict
@@ -31,7 +31,6 @@ from collections import OrderedDict
 import torch
 from torch.utils.data import DataLoader
 
-import robomimic
 import robomimic.utils.train_utils as TrainUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
@@ -40,6 +39,7 @@ import robomimic.utils.file_utils as FileUtils
 from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
+
 
 
 def train(config, device, resume=False):
@@ -251,7 +251,7 @@ def train(config, device, resume=False):
         # load model weights and optimizer state
         model.deserialize(ckpt_dict["model"], load_optimizers=True)
         print("*" * 50)
-    
+
     # if checkpoint is specified, load in model weights;
     # will not use ckpt_path if resuming training
     ckpt_path = config.experiment.ckpt_path
@@ -423,7 +423,7 @@ def train(config, device, resume=False):
         )
 
         # Save model checkpoints based on conditions (success rate, validation loss, etc)
-        if should_save_ckpt:    
+        if should_save_ckpt:
             TrainUtils.save_model(
                 model=model,
                 config=config,

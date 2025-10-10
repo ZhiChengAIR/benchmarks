@@ -18,18 +18,18 @@
             "on_best_rollout_return": false,
             "on_best_rollout_success_rate": true
         },
-        "epoch_every_n_steps": 100,
+        "epoch_every_n_steps": 300,
         "validation_epoch_every_n_steps": 10,
         "env": null,
         "additional_envs": null,
-        "render": false,
+        "render": true,
         "render_video": true,
         "keep_all_videos": false,
         "video_skip": 5,
         "rollout": {
             "enabled": true,
             "n": 50,
-            "horizon": 400,
+            "horizon": 700,
             "rate": 50,
             "warmstart": 0,
             "terminate_on_success": true
@@ -67,8 +67,8 @@
         },
         "goal_mode": null,
         "cuda": true,
-        "batch_size": 100,
-        "num_epochs": 2000,
+        "batch_size": 256,
+        "num_epochs": 3000,
         "seed": 1,
         "max_grad_norm": null
     },
@@ -147,7 +147,7 @@
                     "robot0_gripper_qpos",
                     "object"
                 ],
-                "rgb": [],
+                "rgb": ["sideview_image", "robot0_eye_in_hand_image"],
                 "depth": [],
                 "scan": []
             },

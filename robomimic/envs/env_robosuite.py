@@ -45,12 +45,12 @@ except ImportError:
 class EnvRobosuite(EB.EnvBase):
     """Wrapper class for robosuite environments (https://github.com/ARISE-Initiative/robosuite)"""
     def __init__(
-        self, 
-        env_name, 
-        render=False, 
-        render_offscreen=False, 
-        use_image_obs=False, 
-        use_depth_obs=False, 
+        self,
+        env_name,
+        render=False,
+        render_offscreen=False,
+        use_image_obs=False,
+        use_depth_obs=False,
         lang=None,
         **kwargs,
     ):
@@ -139,6 +139,7 @@ class EnvRobosuite(EB.EnvBase):
         obs, r, done, info = self.env.step(action)
         obs = self.get_observation(obs)
         info["is_success"] = self.is_success()
+
         return obs, r, self.is_done(), info
 
     def reset(self, unset_ep_meta=True):
@@ -148,7 +149,7 @@ class EnvRobosuite(EB.EnvBase):
         Args:
             unset_ep_meta (np.array): whether to reset any previously set episode metadata (otherwise
                 will continue to use previous episode metadata)
-        
+
         Returns:
             observation (dict): initial observation dictionary.
         """
@@ -157,7 +158,7 @@ class EnvRobosuite(EB.EnvBase):
             # (this feature was set from robosuite v1.5 onwards)
             self.env.unset_ep_meta()
         di = self.env.reset()
-        return self.get_observation(di)        
+        return self.get_observation(di)
 
     def reset_to(self, state):
         """
@@ -167,7 +168,7 @@ class EnvRobosuite(EB.EnvBase):
             state (dict): current simulator state that contains one or more of:
                 - states (np.ndarray): initial state of the mujoco environment
                 - model (str): mujoco scene xml
-        
+
         Returns:
             observation (dict): observation dictionary after setting the simulator state (only
                 if "states" is in @state)
@@ -243,7 +244,7 @@ class EnvRobosuite(EB.EnvBase):
         Get current environment observation dictionary.
 
         Args:
-            di (dict): current raw observation dictionary from robosuite to wrap and provide 
+            di (dict): current raw observation dictionary from robosuite to wrap and provide
                 as a dictionary. If not provided, will be queried from robosuite.
         """
         if di is None:
@@ -258,7 +259,7 @@ class EnvRobosuite(EB.EnvBase):
                 ret[k] = di[k][::-1].copy()
                 if len(ret[k].shape) == 2:
                     ret[k] = ret[k][..., None] # (H, W, 1)
-                assert len(ret[k].shape) == 3 
+                assert len(ret[k].shape) == 3
                 # scale entries in depth map to correspond to real distance.
                 ret[k] = self.get_real_depth_map(ret[k])
 
@@ -440,7 +441,7 @@ class EnvRobosuite(EB.EnvBase):
         main_version = int(robosuite.__version__.split(".")[0])
         sub_version = int(robosuite.__version__.split(".")[1])
         return (main_version > 1) or (main_version == 1 and sub_version >= 5)
-    
+
     @property
     def version(self):
         """
@@ -463,22 +464,22 @@ class EnvRobosuite(EB.EnvBase):
 
     @classmethod
     def create_for_data_processing(
-        cls, 
-        env_name, 
-        camera_names, 
-        camera_height, 
-        camera_width, 
-        reward_shaping, 
-        render=None, 
-        render_offscreen=None, 
-        use_image_obs=None, 
-        use_depth_obs=None, 
+        cls,
+        env_name,
+        camera_names,
+        camera_height,
+        camera_width,
+        reward_shaping,
+        render=None,
+        render_offscreen=None,
+        use_image_obs=None,
+        use_depth_obs=None,
         **kwargs,
     ):
         """
         Create environment for processing datasets, which includes extracting
         observations, labeling dense / sparse rewards, and annotating dones in
-        transitions. 
+        transitions.
 
         Args:
             env_name (str): name of environment
@@ -537,9 +538,9 @@ class EnvRobosuite(EB.EnvBase):
 
         return cls(
             env_name=env_name,
-            render=(False if render is None else render), 
-            render_offscreen=(has_camera if render_offscreen is None else render_offscreen), 
-            use_image_obs=(has_camera if use_image_obs is None else use_image_obs), 
+            render=(False if render is None else render),
+            render_offscreen=(has_camera if render_offscreen is None else render_offscreen),
+            use_image_obs=(has_camera if use_image_obs is None else use_image_obs),
             use_depth_obs=use_depth_obs,
             **kwargs,
         )

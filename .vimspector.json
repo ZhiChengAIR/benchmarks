@@ -1,0 +1,29 @@
+{
+    "configurations": {
+        "test": {
+            "adapter": "debugpy",
+            "configuration": {
+                "name": "Python Test",
+                "python": "${pathToPython:python}",
+                "request": "launch",
+                "program": "${workspaceRoot}/robomimic/scripts/train.py",
+                "args": [
+                    "--config",
+                    "../exps/templates/diffusion_policy.json",
+                    "--dataset",
+                    "/data/tool_hang/ph/image_v15.hdf5",
+                    "--resume"
+                ],
+                "stopOnEntry": true,
+                "console": "integratedTerminal"
+            },
+            "breakpoints": {
+                "exception": {
+                    "raised": "N",
+                    "uncaught": "",
+                    "userUnhandled": ""
+                }
+            }
+        }
+    }
+}

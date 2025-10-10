@@ -672,8 +672,11 @@ class DiffusionPolicyTransformer(PolicyAlgo):
         action = action.unsqueeze(0)
         return action
 
+    @torch.inference_mode()
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
         assert not self.nets.training
+        To = self.algo_config.horizon.observation_horizon
+        Ta = self.algo_config.horizon.action_horizon
         Tp = self.algo_config.horizon.prediction_horizon
         action_dim = self.ac_dim
         if self.algo_config.ddpm.enabled is True:
@@ -726,6 +729,10 @@ class DiffusionPolicyTransformer(PolicyAlgo):
                 timestep=k,
                 sample=action
             ).prev_sample
+
+        start = To - 1
+        end = start + Ta
+        action = action[:, start:end]    # slice the window to execute now
 
         return action
 
