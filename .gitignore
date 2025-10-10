@@ -6,6 +6,8 @@ tests/assets/test.hdf5
 tests/assets/test_v141.hdf5
 tests/assets/test_v15.hdf5
 
+diffusion_policy_trained_models/
+
 # pycharm configs
 .idea/
 
