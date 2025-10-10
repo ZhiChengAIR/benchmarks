@@ -242,10 +242,26 @@ class ObservationTokeniser(Module):
                 # make sure net is shared with another modality
                 self.obs_nets[k] = self.obs_nets[self.obs_share_mods[k]]
 
+            if ObsUtils.OBS_KEYS_TO_MODALITIES[k] == "rgb":
+                rgb_output_dim = self.obs_nets[k].output_shape(
+                    input_shape=self.obs_nets_kwargs[k]["input_shape"]
+                )
+
         self.lowdim_tokeniser = LowDimCore(
             lowdim_shape_dict=self.lowdim_shape_dict,
             output_dim=self.output_dim,
             dropout=self.dropout
+        )
+
+        def approx_gelu(): return nn.GELU(approximate="tanh")
+        self.rgb_projector = MLP(
+            input_dim=self.input_shape,
+            output_dim=rgb_output_dim,
+            layer_dims=[rgb_output_dim],
+            activation=approx_gelu,
+            dropouts=[self.dropout],
+            normalization=True,
+            output_activation=approx_gelu
         )
 
         self.activation = None
