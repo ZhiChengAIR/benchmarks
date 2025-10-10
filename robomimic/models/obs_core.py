@@ -142,11 +142,11 @@ class VisualCore(EncoderCore, BaseNets.ConvBase):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -185,6 +185,23 @@ class VisualCore(EncoderCore, BaseNets.ConvBase):
         msg = header + '(' + msg + '\n)'
         return msg
 
+
+class LowDimCore(EncoderCore):
+    """
+    Encodes all lowdim data into a single embedding.
+    """
+    def __init__(
+        self,
+        lowdim_input_dict: Dict,
+        output_dim: int
+    ):
+        self.input_dict = lowdim_input_dict
+        self.input_dim = sum(
+            input["input_dim"] for input in lowdim_input_dict.values()
+        )
+        self.lowdim_encoder = MLP(
+
+        )
 
 class VisualCoreLanguageConditioned(VisualCore):
     """
