@@ -11,6 +11,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from timm.models.vision_transformer import RmsNorm, Mlp
+from .attention import Attention, CrossAttention
+
 from robomimic.models.base_nets import Module
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
@@ -424,3 +427,223 @@ class GPT_Backbone(Module):
         x = self.nets["transformer"](inputs)
         transformer_output = self.nets["output_ln"](x)
         return transformer_output
+
+
+class SpatioTemporalBlock(nn.Module):
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 proj_drop,
+                 attn_drop,
+                 t,
+                 **block_kwargs):
+        super().__init__()
+        self.norm1 = RmsNorm(hidden_size, eps=1e-6)
+        self.norm2 = RmsNorm(hidden_size, eps=1e-6)
+        self.attn = Attention(
+            dim=hidden_size,
+            num_heads=num_heads,
+            qkv_bias=True,
+            qk_norm=True,
+            norm_layer=RmsNorm,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            **block_kwargs
+        )
+        def approx_gelu(): return nn.GELU(approximate="tanh")
+        self.ffn = Mlp(
+            in_features=hidden_size,
+            hidden_features=hidden_size,
+            act_layer=approx_gelu,
+            drop=proj_drop
+        )
+
+    def forward(self, x, mask):
+        origin_x = x
+        x = self.norm1(x)
+        x = self.attn(x, mask)
+        x = x + origin_x
+
+        origin_x = x
+        x = self.norm2(x)
+        x = self.ffn(x)
+        x = x + origin_x
+
+        return x
+
+
+class SpatioTemporalEncoder(nn.Module):
+    def __init__(
+        self,
+        dim,
+        depth,
+        heads,
+        output_dim,
+        attn_drop,
+        proj_drop,
+        n_obs_steps
+    ) -> None:
+        super().__init__()
+        self.num_heads = heads
+        self.t = n_obs_steps
+        self.layers = nn.ModuleList([
+            SpatioTemporalBlock(
+                hidden_size=dim,
+                num_heads=heads,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop,
+                t=n_obs_steps
+            )
+            for _ in range(depth)
+        ])
+
+        self._init_weights()
+
+    def forward(self, x, mask):
+        for block in self.layers:
+            x = block(x, mask)
+
+        return x
+
+    def _init_weights(self) -> None:
+        """
+        Initialises all the ffn weights in the DiT encoder and separation
+        special token with xavier uniform/normal distribution, and the
+        positional embeddings to sin-cos
+        """
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
+        self.apply(_basic_init)
+
+
+class FinalLayer(nn.Module):
+    """
+    The final layer of the diffusion model.
+    """
+
+    def __init__(self, hidden_size, out_channels, drop):
+        super().__init__()
+        self.norm_final = RmsNorm(hidden_size, eps=1e-6)
+        def approx_gelu(): return nn.GELU(approximate="tanh")
+        self.linear = Mlp(
+            in_features=hidden_size,
+            hidden_features=hidden_size,
+            out_features=out_channels,
+            act_layer=approx_gelu,
+            drop=drop,
+            bias=False
+        )
+
+    def forward(self, x):
+        x = self.norm_final(x)
+        x = self.linear(x)
+
+        return x
+
+
+class DiTBlock(nn.Module):
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 proj_drop,
+                 attn_drop,
+                 **block_kwargs):
+        super().__init__()
+        self.norm1 = RmsNorm(hidden_size, eps=1e-6)
+        self.attn = Attention(
+            dim=hidden_size, num_heads=num_heads,
+            qkv_bias=True, qk_norm=True,
+            norm_layer=RmsNorm,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            **block_kwargs)
+        self.cross_attn = CrossAttention(
+            hidden_size, num_heads=num_heads,
+            qkv_bias=True, qk_norm=True,
+            norm_layer=RmsNorm,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            **block_kwargs)
+
+        self.norm2 = RmsNorm(hidden_size, eps=1e-6)
+        def approx_gelu(): return nn.GELU(approximate="tanh")
+        self.ffn = Mlp(
+            in_features=hidden_size,
+            hidden_features=hidden_size,
+            act_layer=approx_gelu,
+            drop=proj_drop
+        )
+        self.norm3 = RmsNorm(hidden_size, eps=1e-6)
+
+    def forward(self, x, c, mask=None, memory_mask=None):
+        origin_x = x
+        x = self.norm1(x)
+        x = self.attn(x, mask)
+        x = x + origin_x
+
+        origin_x = x
+        x = self.norm2(x)
+        x = self.cross_attn(x, c, memory_mask)
+        x = x + origin_x
+
+        origin_x = x
+        x = self.norm3(x)
+        x = self.ffn(x)
+        x = x + origin_x
+
+        return x
+
+
+class DiT(nn.Module):
+    def __init__(
+        self,
+        dim,
+        depth,
+        heads,
+        output_dim,
+        attn_drop,
+        proj_drop
+    ) -> None:
+        super().__init__()
+        self.num_heads = heads
+        self.layers = nn.ModuleList([
+            DiTBlock(
+                hidden_size=dim,
+                num_heads=heads,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop
+            )
+            for _ in range(depth)
+        ])
+        self.final_layer = FinalLayer(
+            hidden_size=dim,
+            out_channels=output_dim,
+            drop=proj_drop
+        )
+
+        self._init_weights()
+
+    def forward(self, x, c, mask=None, memory_mask=None):
+        for layer in self.layers:
+            x = layer(x, c, mask, memory_mask)
+        x = self.final_layer(x)
+
+        return x
+
+    def _init_weights(self) -> None:
+        """
+        Initialises all the ffn weights in the DiT encoder and separation
+        special token with xavier uniform/normal distribution, and the
+        positional embeddings to sin-cos
+        """
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
+        self.apply(_basic_init)

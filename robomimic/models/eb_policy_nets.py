@@ -175,7 +175,6 @@ class ConditionalUnet1D(nn.Module):
             nn.Conv1d(start_dim, input_dim, 1),
         )
 
-        self.diffusion_step_encoder = diffusion_step_encoder
         self.up_modules = up_modules
         self.down_modules = down_modules
         self.final_conv = final_conv
@@ -189,7 +188,6 @@ class ConditionalUnet1D(nn.Module):
             global_cond=None):
         """
         x: (B,T,input_dim)
-        timestep: (B,) or int, diffusion step
         global_cond: (B,global_cond_dim)
         output: (B,T,input_dim)
         """
@@ -197,11 +195,7 @@ class ConditionalUnet1D(nn.Module):
         sample = sample.moveaxis(-1,-2)
         # (B,C,T)
 
-
-        if global_cond is not None:
-            global_feature = torch.cat([
-                global_feature, global_cond
-            ], axis=-1)
+        global_feature = global_cond
 
         x = sample
         h = []

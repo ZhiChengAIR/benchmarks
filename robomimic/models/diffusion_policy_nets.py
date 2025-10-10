@@ -5,6 +5,8 @@ from typing import Union
 import torch
 import torch.nn as nn
 
+from robomimic.models.transformers import SpatioTemporalEncoder, DiT
+
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -249,14 +251,20 @@ class ConditionalUnet1D(nn.Module):
 
 
 class DiffusionTransformer(nn.Module):
-    def __init__(self,
+    def __init__(
+        self,
         input_dim,
-        global_cond_dim,
-        diffusion_step_embed_dim=256,
-        down_dims=[256,512,1024],
-        kernel_size=5,
-        n_groups=8
-        ):
+        cond_dim,
+        embed_dim,
+        output_dim,
+        attn_dropout,
+        block_output_dropout,
+        num_layers,
+        num_heads,
+        activation,
+        n_obs_steps,
+        horizon
+    ):
         """
         input_dim: Dim of actions.
         global_cond_dim: Dim of global conditioning applied with FiLM
@@ -269,97 +277,52 @@ class DiffusionTransformer(nn.Module):
         """
 
         super().__init__()
-        diffusion_transformer = GPT_Backbone(
-            embed_dim=embed_dim,
-            context_length=context_length,
-            attn_dropout=attn_dropout,
-            bloblock_output_dropout=block_output_dropout,
-            num_layers=num_layers,
-            num_head=num_heads,
-            activation=activation
-        )._create_networks()
+        # input embedding stem
+        self.input_emb = nn.Linear(input_dim, embed_dim)
+        self.cond_pos_emb = nn.Parameter(torch.zeros(1, n_obs_steps, embed_dim))
+        self.input_pos_emb = nn.Parameter(torch.zeros(1, horizon, embed_dim))
+        self.time_emb = SinusoidalPosEmb(embed_dim)
+        self.cond_obs_emb = nn.Linear(cond_dim, embed_dim)
 
-
-
-
-
-        all_dims = [input_dim] + list(down_dims)
-        start_dim = down_dims[0]
-
-        dsed = diffusion_step_embed_dim
-        diffusion_step_encoder = nn.Sequential(
-            SinusoidalPosEmb(dsed),
-            nn.Linear(dsed, dsed * 4),
-            nn.Mish(),
-            nn.Linear(dsed * 4, dsed),
+        self.encoder = SpatioTemporalEncoder(
+            dim=embed_dim,
+            depth=num_layers,
+            heads=num_heads,
+            output_dim=output_dim,
+            attn_drop=attn_dropout,
+            proj_drop=block_output_dropout,
+            n_obs_steps=n_obs_steps
         )
-        cond_dim = dsed + global_cond_dim
-
-        in_out = list(zip(all_dims[:-1], all_dims[1:]))
-        mid_dim = all_dims[-1]
-        self.mid_modules = nn.ModuleList([
-            ConditionalResidualBlock1D(
-                mid_dim, mid_dim, cond_dim=cond_dim,
-                kernel_size=kernel_size, n_groups=n_groups
-            ),
-            ConditionalResidualBlock1D(
-                mid_dim, mid_dim, cond_dim=cond_dim,
-                kernel_size=kernel_size, n_groups=n_groups
-            ),
-        ])
-
-        down_modules = nn.ModuleList([])
-        for ind, (dim_in, dim_out) in enumerate(in_out):
-            is_last = ind >= (len(in_out) - 1)
-            down_modules.append(nn.ModuleList([
-                ConditionalResidualBlock1D(
-                    dim_in, dim_out, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
-                ConditionalResidualBlock1D(
-                    dim_out, dim_out, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
-                Downsample1d(dim_out) if not is_last else nn.Identity()
-            ]))
-
-        up_modules = nn.ModuleList([])
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (len(in_out) - 1)
-            up_modules.append(nn.ModuleList([
-                ConditionalResidualBlock1D(
-                    dim_out*2, dim_in, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
-                ConditionalResidualBlock1D(
-                    dim_in, dim_in, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
-                Upsample1d(dim_in) if not is_last else nn.Identity()
-            ]))
-
-        final_conv = nn.Sequential(
-            Conv1dBlock(start_dim, start_dim, kernel_size=kernel_size),
-            nn.Conv1d(start_dim, input_dim, 1),
+        self.decoder = DiT(
+            dim=embed_dim,
+            depth=num_layers,
+            heads=num_heads,
+            output_dim=output_dim,
+            attn_drop=attn_dropout,
+            proj_drop=block_output_dropout
         )
-
-        self.diffusion_step_encoder = diffusion_step_encoder
-        self.up_modules = up_modules
-        self.down_modules = down_modules
-        self.final_conv = final_conv
+        context_length = n_obs_steps
+        mask = torch.tril(torch.ones(context_length, context_length)).view(
+            1, 1, context_length, context_length
+        )
+        self.register_buffer("mask", mask)
 
         print("number of parameters: {:e}".format(
             sum(p.numel() for p in self.parameters()))
         )
 
-    def forward(self,
-            sample: torch.Tensor,
-            timestep: Union[torch.Tensor, float, int],
-            global_cond=None):
+    def forward(
+        self,
+        sample: torch.Tensor,
+        timestep: Union[torch.Tensor, float, int],
+        cond: torch.Tensor
+    ):
         """
         x: (B,T,input_dim)
         timestep: (B,) or int, diffusion step
         global_cond: (B,global_cond_dim)
         output: (B,T,input_dim)
         """
-        # (B,T,C)
-        sample = sample.moveaxis(-1,-2)
         # (B,C,T)
 
         # 1. time
@@ -371,33 +334,12 @@ class DiffusionTransformer(nn.Module):
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timesteps = timesteps.expand(sample.shape[0])
 
-        global_feature = self.diffusion_step_encoder(timesteps)
+        x = self.input_emb(sample) + self.input_pos_emb
+        c = self.cond_obs_emb(cond) + self.cond_pos_emb
+        t = self.time_emb(timesteps)
 
-        if global_cond is not None:
-            global_feature = torch.cat([
-                global_feature, global_cond
-            ], axis=-1)
+        c = self.encoder(c, self.mask)
+        x = self.decoder(x=x, c=c, t=t, mask=None, memory_mask=self.mask)
 
-        x = sample
-        h = []
-        for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
-            x = resnet(x, global_feature)
-            x = resnet2(x, global_feature)
-            h.append(x)
-            x = downsample(x)
-
-        for mid_module in self.mid_modules:
-            x = mid_module(x, global_feature)
-
-        for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
-            x = torch.cat((x, h.pop()), dim=1)
-            x = resnet(x, global_feature)
-            x = resnet2(x, global_feature)
-            x = upsample(x)
-
-        x = self.final_conv(x)
-
-        # (B,C,T)
-        x = x.moveaxis(-1,-2)
         # (B,T,C)
         return x
