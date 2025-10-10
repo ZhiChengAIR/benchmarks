@@ -164,13 +164,13 @@ class ObservationTokeniser(Module):
                 as another observation key. This observation key must already exist in this encoder.
                 Warning: Note that this does not share the observation key randomizer
         """
-        assert not self._locked, "ObservationEncoder: @register_obs_key called after @make"
-        assert name not in self.obs_shapes, "ObservationEncoder: modality {} already exists".format(name)
+        assert not self._locked, "ObservationTokeniser: @register_obs_key called after @make"
+        assert name not in self.obs_shapes, "ObservationTokeniser: modality {} already exists".format(name)
 
         if net is not None:
-            assert isinstance(net, Module), "ObservationEncoder: @net must be instance of Module class"
+            assert isinstance(net, Module), "ObservationTokeniser: @net must be instance of Module class"
             assert (net_class is None) and (net_kwargs is None) and (share_net_from is None), \
-                "ObservationEncoder: @net provided - ignore other net creation options"
+                "ObservationTokeniser: @net provided - ignore other net creation options"
 
         if share_net_from is not None:
             # share processing with another modality

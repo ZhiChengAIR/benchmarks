@@ -191,6 +191,7 @@ class LowDimCore(EncoderCore):
     """
     Encodes all lowdim data into a single embedding.
     """
+
     def __init__(
         self,
         lowdim_input_dict: Dict,
@@ -202,7 +203,6 @@ class LowDimCore(EncoderCore):
         self.input_shape = sum(
             input["input_dim"] for input in lowdim_input_dict.values()
         )
-        self.output_dim = output_dim
         def approx_gelu(): return nn.GELU(approximate="tanh")
         self.lowdim_encoder = MLP(
             input_dim=self.input_shape,
@@ -224,8 +224,8 @@ class LowDimCore(EncoderCore):
 
         return lowdim_emb
 
-    def output_shape(self, input_shape: int):
-        return self.output_dim
+    def output_shape(self, input_shape: int = None):
+        return self.lowdim_encoder.output_shape()
 
     def __repr__(self):
         """Pretty print network."""
