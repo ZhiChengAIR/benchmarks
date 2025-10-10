@@ -15,22 +15,22 @@ class DiffusionPolicyConfig(BaseConfig):
         - set compatible data loading parameters
         """
         super(DiffusionPolicyConfig, self).train_config()
-        
+
         # disable next_obs loading from hdf5
         self.train.hdf5_load_next_obs = False
 
         # set compatible data loading parameters
         self.train.seq_length = 16 # should match self.algo.horizon.prediction_horizon
         self.train.frame_stack = 2 # should match self.algo.horizon.observation_horizon
-    
+
     def algo_config(self):
         """
-        This function populates the `config.algo` attribute of the config, and is given to the 
-        `Algo` subclass (see `algo/algo.py`) for each algorithm through the `algo_config` 
-        argument to the constructor. Any parameter that an algorithm needs to determine its 
+        This function populates the `config.algo` attribute of the config, and is given to the
+        `Algo` subclass (see `algo/algo.py`) for each algorithm through the `algo_config`
+        argument to the constructor. Any parameter that an algorithm needs to determine its
         training and test-time behavior should be populated here.
         """
-        
+
         # optimization parameters
         self.algo.optim_params.policy.optimizer_type = "adamw"
         self.algo.optim_params.policy.learning_rate.initial = 1e-4      # policy learning rate
@@ -47,18 +47,26 @@ class DiffusionPolicyConfig(BaseConfig):
         self.algo.horizon.observation_horizon = 2
         self.algo.horizon.action_horizon = 8
         self.algo.horizon.prediction_horizon = 16
-        
+
         # UNet parameters
-        self.algo.unet.enabled = True
+        self.algo.unet.enabled = False
         self.algo.unet.diffusion_step_embed_dim = 256
         self.algo.unet.down_dims = [256,512,1024]
         self.algo.unet.kernel_size = 5
         self.algo.unet.n_groups = 8
-        
+
+        # Transformer parameters
+        self.algo.transformer.enabled = True
+        self.algo.transformer.embed_dim = 256
+        self.algo.transformer.num_layers = 8
+        self.algo.transformer.num_heads = 4
+        self.algo.transformer.attn_dropout = 0.3
+        self.algo.transformer.proj_dropout = 0.0
+
         # EMA parameters
         self.algo.ema.enabled = True
         self.algo.ema.power = 0.75
-        
+
         # Noise Scheduler
         ## DDPM
         self.algo.ddpm.enabled = True

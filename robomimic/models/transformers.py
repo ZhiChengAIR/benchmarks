@@ -520,6 +520,10 @@ class SpatioTemporalEncoder(nn.Module):
         self.apply(_basic_init)
 
 
+def modulate(x, shift, scale):
+    return x * (1 + scale) + shift
+
+
 class FinalLayer(nn.Module):
     """
     The final layer of the diffusion model.
@@ -535,11 +539,17 @@ class FinalLayer(nn.Module):
             out_features=out_channels,
             act_layer=approx_gelu,
             drop=drop,
-            bias=False
+            bias=True
+        )
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 2 * hidden_size, bias=True)
         )
 
-    def forward(self, x):
+    def forward(self, x, t):
+        shift, scale = self.adaLN_modulation(t).chunk(2, dim=-1)
         x = self.norm_final(x)
+        x = modulate(x, shift, scale)
         x = self.linear(x)
 
         return x
@@ -578,21 +588,32 @@ class DiTBlock(nn.Module):
             drop=proj_drop
         )
         self.norm3 = RmsNorm(hidden_size, eps=1e-6)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 9 * hidden_size, bias=True)
+        )
 
-    def forward(self, x, c, mask=None, memory_mask=None):
+    def forward(self, x, c, t, mask=None, memory_mask=None):
+        adaln_features = self.adaLN_modulation(t).chunk(9, dim=-1)
+        shift_msa, scale_msa, gate_msa = adaln_features[:3]
+        shift_mca, scale_mca, gate_mca = adaln_features[3:6]
+        shift_mlp, scale_mlp, gate_mlp = adaln_features[6:]
         origin_x = x
         x = self.norm1(x)
-        x = self.attn(x, mask)
+        x = modulate(x, shift_msa, scale_msa)
+        x = self.attn(x, mask) * gate_msa
         x = x + origin_x
 
         origin_x = x
         x = self.norm2(x)
-        x = self.cross_attn(x, c, memory_mask)
+        x = modulate(x, shift_mca, scale_mca)
+        x = self.cross_attn(x, c, memory_mask) * gate_mca
         x = x + origin_x
 
         origin_x = x
         x = self.norm3(x)
-        x = self.ffn(x)
+        x = modulate(x, shift_mlp, scale_mlp)
+        x = self.ffn(x) * gate_mlp
         x = x + origin_x
 
         return x
@@ -627,10 +648,10 @@ class DiT(nn.Module):
 
         self._init_weights()
 
-    def forward(self, x, c, mask=None, memory_mask=None):
+    def forward(self, x, c, t, mask=None, memory_mask=None):
         for layer in self.layers:
-            x = layer(x, c, mask, memory_mask)
-        x = self.final_layer(x)
+            x = layer(x, c, t, mask, memory_mask)
+        x = self.final_layer(x, t)
 
         return x
 
@@ -647,3 +668,14 @@ class DiT(nn.Module):
                     nn.init.constant_(module.bias, 0)
 
         self.apply(_basic_init)
+        self._init_adaln_zero_weights()
+
+    def _init_adaln_zero_weights(self) -> None:
+        # Zero-out adaLN modulation layers in DiT blocks:
+        for layer in self.layers:
+            nn.init.constant_(layer.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(layer.adaLN_modulation[-1].bias, 0)
+
+        # Zero-out output layers:
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)

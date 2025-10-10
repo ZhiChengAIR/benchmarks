@@ -322,6 +322,7 @@ class EBPolicyUNet(PolicyAlgo):
         Returns:
             action (torch.Tensor): action tensor [1, Da]
         """
+
         # obs_dict: key: [1,D]
         To = self.algo_config.horizon.observation_horizon
         Ta = self.algo_config.horizon.action_horizon

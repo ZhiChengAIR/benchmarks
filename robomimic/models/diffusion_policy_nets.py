@@ -250,6 +250,67 @@ class ConditionalUnet1D(nn.Module):
         return x
 
 
+class ObsTemporalEncoder(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        embed_dim,
+        attn_dropout,
+        proj_dropout,
+        num_layers,
+        num_heads,
+        n_obs_steps
+    ):
+        """
+        input_dim: Dim of actions.
+        global_cond_dim: Dim of global conditioning applied with FiLM
+          in addition to diffusion step embedding. This is usually obs_horizon * obs_dim
+        diffusion_step_embed_dim: Size of positional encoding for diffusion iteration k
+        down_dims: Channel size for each UNet level.
+          The length of this array determines numebr of levels.
+        kernel_size: Conv kernel size
+        n_groups: Number of groups for GroupNorm
+        """
+
+        super().__init__()
+        # input embedding stem
+        self.input_emb = nn.Linear(input_dim, embed_dim)
+        self.cond_pos_emb = nn.Parameter(torch.zeros(1, n_obs_steps, embed_dim))
+
+        self.encoder = SpatioTemporalEncoder(
+            dim=embed_dim,
+            depth=num_layers,
+            heads=num_heads,
+            output_dim=embed_dim,
+            attn_drop=attn_dropout,
+            proj_drop=proj_dropout,
+            n_obs_steps=n_obs_steps
+        )
+        mask = torch.tril(torch.ones(n_obs_steps, n_obs_steps)).view(
+            1, 1, n_obs_steps, n_obs_steps
+        )
+        self.register_buffer("mask", mask)
+
+        print("number of parameters: {:e}".format(
+            sum(p.numel() for p in self.parameters()))
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ):
+        """
+        x: (B,T,input_dim)
+        timestep: (B,) or int, diffusion step
+        global_cond: (B,global_cond_dim)
+        output: (B,T,input_dim)
+        """
+        x = self.input_emb(x) + self.input_pos_emb
+        x = self.encoder(x, self.mask)
+
+        return x
+
+
 class DiffusionTransformer(nn.Module):
     def __init__(
         self,
@@ -258,7 +319,7 @@ class DiffusionTransformer(nn.Module):
         embed_dim,
         output_dim,
         attn_dropout,
-        block_output_dropout,
+        proj_dropout,
         num_layers,
         num_heads,
         activation,
@@ -279,31 +340,19 @@ class DiffusionTransformer(nn.Module):
         super().__init__()
         # input embedding stem
         self.input_emb = nn.Linear(input_dim, embed_dim)
-        self.cond_pos_emb = nn.Parameter(torch.zeros(1, n_obs_steps, embed_dim))
         self.input_pos_emb = nn.Parameter(torch.zeros(1, horizon, embed_dim))
         self.time_emb = SinusoidalPosEmb(embed_dim)
-        self.cond_obs_emb = nn.Linear(cond_dim, embed_dim)
 
-        self.encoder = SpatioTemporalEncoder(
-            dim=embed_dim,
-            depth=num_layers,
-            heads=num_heads,
-            output_dim=output_dim,
-            attn_drop=attn_dropout,
-            proj_drop=block_output_dropout,
-            n_obs_steps=n_obs_steps
-        )
         self.decoder = DiT(
             dim=embed_dim,
             depth=num_layers,
             heads=num_heads,
             output_dim=output_dim,
             attn_drop=attn_dropout,
-            proj_drop=block_output_dropout
+            proj_drop=proj_dropout
         )
-        context_length = n_obs_steps
-        mask = torch.tril(torch.ones(context_length, context_length)).view(
-            1, 1, context_length, context_length
+        mask = torch.tril(torch.ones(n_obs_steps, horizon)).view(
+            1, 1, n_obs_steps, horizon
         )
         self.register_buffer("mask", mask)
 
@@ -335,10 +384,9 @@ class DiffusionTransformer(nn.Module):
         timesteps = timesteps.expand(sample.shape[0])
 
         x = self.input_emb(sample) + self.input_pos_emb
-        c = self.cond_obs_emb(cond) + self.cond_pos_emb
         t = self.time_emb(timesteps)
+        c = cond
 
-        c = self.encoder(c, self.mask)
         x = self.decoder(x=x, c=c, t=t, mask=None, memory_mask=self.mask)
 
         # (B,T,C)
