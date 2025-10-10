@@ -275,7 +275,7 @@ class ObsTemporalEncoder(nn.Module):
         super().__init__()
         # input embedding stem
         self.input_emb = nn.Linear(input_dim, embed_dim)
-        self.cond_pos_emb = nn.Parameter(torch.zeros(1, n_obs_steps, embed_dim))
+        self.input_pos_emb = nn.Parameter(torch.zeros(1, n_obs_steps, embed_dim))
 
         self.encoder = SpatioTemporalEncoder(
             dim=embed_dim,
@@ -322,7 +322,6 @@ class DiffusionTransformer(nn.Module):
         proj_dropout,
         num_layers,
         num_heads,
-        activation,
         n_obs_steps,
         horizon
     ):
@@ -351,8 +350,8 @@ class DiffusionTransformer(nn.Module):
             attn_drop=attn_dropout,
             proj_drop=proj_dropout
         )
-        mask = torch.tril(torch.ones(n_obs_steps, horizon)).view(
-            1, 1, n_obs_steps, horizon
+        mask = torch.tril(torch.ones(horizon, n_obs_steps)).view(
+            1, 1, horizon, n_obs_steps
         )
         self.register_buffer("mask", mask)
 
@@ -384,9 +383,8 @@ class DiffusionTransformer(nn.Module):
         timesteps = timesteps.expand(sample.shape[0])
 
         x = self.input_emb(sample) + self.input_pos_emb
-        t = self.time_emb(timesteps)
+        t = self.time_emb(timesteps)[:, None]
         c = cond
-
         x = self.decoder(x=x, c=c, t=t, mask=None, memory_mask=self.mask)
 
         # (B,T,C)

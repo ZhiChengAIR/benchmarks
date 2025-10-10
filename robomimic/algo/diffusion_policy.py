@@ -44,6 +44,7 @@ def algo_config_to_class(algo_config):
     if algo_config.unet.enabled:
         return DiffusionPolicyUNet, {}
     elif algo_config.transformer.enabled:
+        print("Loaded in transformer")
         return DiffusionPolicyTransformer, {}
     else:
         raise RuntimeError()
@@ -444,8 +445,10 @@ class DiffusionPolicyTransformer(PolicyAlgo):
             output_dim=self.ac_dim,
             num_layers=self.algo_config.transformer.num_layers,
             num_heads=self.algo_config.transformer.num_heads,
-            attn_droput=self.algo_config.transformer.attn_dropout,
-            proj_dropout=self.algo_config.transformer.proj_dropout
+            attn_dropout=self.algo_config.transformer.attn_dropout,
+            proj_dropout=self.algo_config.transformer.proj_dropout,
+            n_obs_steps=self.algo_config.horizon.observation_horizon,
+            horizon=self.algo_config.horizon.prediction_horizon
         )
 
         # the final arch has 2 parts
@@ -547,7 +550,7 @@ class DiffusionPolicyTransformer(PolicyAlgo):
 
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
-            info = super(DiffusionPolicyUNet, self).train_on_batch(batch, epoch, validate=validate)
+            info = super(DiffusionPolicyTransformer, self).train_on_batch(batch, epoch, validate=validate)
             actions = batch["actions"]
 
             # encode obs
@@ -622,7 +625,7 @@ class DiffusionPolicyTransformer(PolicyAlgo):
         Returns:
             loss_log (dict): name -> summary statistic
         """
-        log = super(DiffusionPolicyUNet, self).log_info(info)
+        log = super(DiffusionPolicyTransformer, self).log_info(info)
         log["Loss"] = info["losses"]["l2_loss"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
@@ -714,7 +717,7 @@ class DiffusionPolicyTransformer(PolicyAlgo):
             noise_pred = nets["policy"]["noise_pred_net"](
                 sample=action,
                 timestep=k,
-                obs_cond=obs_cond
+                cond=obs_cond
             )
 
             # inverse diffusion step (remove noise)
