@@ -1,5 +1,5 @@
 """
-Contains torch Modules that correspond to basic network building blocks, like 
+Contains torch Modules that correspond to basic network building blocks, like
 MLP, RNN, and CNN backbones.
 """
 
@@ -58,7 +58,7 @@ def transformer_args_from_config(transformer_config):
         transformer_activation=transformer_config.activation,
         transformer_nn_parameter_for_timesteps=transformer_config.nn_parameter_for_timesteps,
     )
-    
+
     if "num_layers" in transformer_config:
         transformer_args["transformer_num_layers"] = transformer_config.num_layers
 
@@ -73,11 +73,11 @@ class Module(torch.nn.Module):
     @abc.abstractmethod
     def output_shape(self, input_shape=None):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -107,11 +107,11 @@ class Sequential(torch.nn.Sequential, Module):
 
     def output_shape(self, input_shape=None):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -149,11 +149,11 @@ class Parameter(Module):
 
     def output_shape(self, input_shape=None):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -269,11 +269,11 @@ class MLP(Module):
 
     def output_shape(self, input_shape=None):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -378,11 +378,11 @@ class RNN_Base(Module):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -482,11 +482,11 @@ class ConvBase(Module):
     # dirty hack - re-implement to pass the buck onto subclasses from ABC parent
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -537,11 +537,11 @@ class ResNet18Conv(ConvBase):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -594,11 +594,11 @@ class ResNet50Conv(ConvBase):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -629,14 +629,14 @@ class FiLMLayer(ConvBase):
         # Consider initializing to 0?
         self.lang_proj = nn.Linear(lang_emb_dim, channels * 2)
         self.relu = nn.ReLU()
-    
+
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -717,11 +717,11 @@ class ResNet18ConvFiLM(ConvBase):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -737,7 +737,7 @@ class ResNet18ConvFiLM(ConvBase):
         for conv, film in zip(self._conv_blocks, self._film_layers):
             x = conv(x)
             x = film(x, lang_emb)
-        
+
         return x
 
     def __repr__(self):
@@ -963,11 +963,11 @@ class CoordConv2d(nn.Conv2d, Module):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -1010,11 +1010,11 @@ class ShallowConv(ConvBase):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -1055,7 +1055,7 @@ class Conv1dBase(Module):
 
         # Get activation requested
         activation = CONV_ACTIVATIONS[activation]
-        
+
         # Add layer kwargs
         conv_kwargs["out_channels"] = out_channels
         conv_kwargs["kernel_size"] = kernel_size
@@ -1177,11 +1177,11 @@ class SpatialSoftmax(ConvBase):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -1193,9 +1193,9 @@ class SpatialSoftmax(ConvBase):
 
     def forward(self, feature):
         """
-        Forward pass through spatial softmax layer. For each keypoint, a 2D spatial 
-        probability distribution is created using a softmax, where the support is the 
-        pixel locations. This distribution is used to compute the expected value of 
+        Forward pass through spatial softmax layer. For each keypoint, a 2D spatial
+        probability distribution is created using a softmax, where the support is the
+        pixel locations. This distribution is used to compute the expected value of
         the pixel location, which becomes a keypoint of dimension 2. K such keypoints
         are created.
 
@@ -1257,11 +1257,11 @@ class SpatialMeanPool(Module):
 
     def output_shape(self, input_shape=None):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -1276,9 +1276,9 @@ class SpatialMeanPool(Module):
 
 class FeatureAggregator(Module):
     """
-    Helpful class for aggregating features across a dimension. This is useful in 
+    Helpful class for aggregating features across a dimension. This is useful in
     practice when training models that break an input image up into several patches
-    since features can be extraced per-patch using the same encoder and then 
+    since features can be extraced per-patch using the same encoder and then
     aggregated using this module.
     """
     def __init__(self, dim=1, agg_type="avg"):
@@ -1296,17 +1296,17 @@ class FeatureAggregator(Module):
 
     def output_shape(self, input_shape):
         """
-        Function to compute output shape from inputs to this module. 
+        Function to compute output shape from inputs to this module.
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
-                Some modules may not need this argument, if their output does not depend 
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
             out_shape ([int]): list of integers corresponding to output shape
         """
-        # aggregates on @self.dim, so it is removed from the output shape 
+        # aggregates on @self.dim, so it is removed from the output shape
         return list(input_shape[:self.dim]) + list(input_shape[self.dim+1:])
 
     def forward(self, x):
