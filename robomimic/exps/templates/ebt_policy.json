@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../diffusion_policy_trained_models",
+        "output_dir": "../ebt_policy_trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
@@ -155,7 +155,9 @@
             },
             "rgb": {
                 "core_class": "VisionTokeniser",
-                "core_kwargs": {},
+                "core_kwargs": {
+                    "dropout": 0.0
+                },
                 "obs_randomizer_class": null,
                 "obs_randomizer_kwargs": {}
             },

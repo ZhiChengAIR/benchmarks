@@ -18,18 +18,27 @@ import robomimic.utils.lang_utils as LangUtils
 from robomimic.utils.python_utils import extract_class_init_kwargs_from_dict
 
 # NOTE: this is required for the backbone classes to be found by the `eval` call in the core networks
+from robomimic.models.base_nets import (
+    Module,
+    Sequential,
+    MLP,
+    RNN_Base,
+    ResNet18Conv,
+    SpatialSoftmax,
+    FeatureAggregator
+)
 from robomimic.models.obs_core import (
     EncoderCore,
     VisualCore,
     VisualCoreLanguageConditioned
 )
 
-
 def obs_tokeniser_factory(
-        obs_shapes,
-        feature_activation=nn.ReLU,
-        encoder_kwargs=None,
-    ):
+    obs_shapes,
+    output_dim,
+    feature_activation=nn.ReLU,
+    encoder_kwargs=None
+):
     """
     Utility function to create an @ObservationTokeniser from kwargs specified in config.
 
@@ -57,7 +66,10 @@ def obs_tokeniser_factory(
             obs_modality2: dict
                 ...
     """
-    enc = ObservationTokeniser(feature_activation=feature_activation)
+    enc = ObservationTokeniser(
+        feature_activation=feature_activation,
+        output_dim=output_dim
+    )
     for k, obs_shape in obs_shapes.items():
         obs_modality = ObsUtils.OBS_KEYS_TO_MODALITIES[k]
         enc_kwargs = deepcopy(ObsUtils.DEFAULT_ENCODER_KWARGS[obs_modality]) if encoder_kwargs is None else \
@@ -115,7 +127,8 @@ def obs_tokeniser_factory(
 
 class Patchify(BaseNets.Module):
     def __init__(self):
-        self.flatten = BaseNets.Flatten(start_dim=2, end_dim=-1)
+        super(Patchify, self).__init__()
+        self.flatten = BaseNets.Flatten(start_dim=-2, end_dim=-1)
         self.transpose = BaseNets.Transpose(dim1=1, dim2=2)
 
     def forward(self, x):
@@ -128,6 +141,8 @@ class Patchify(BaseNets.Module):
         output_shape = deepcopy(input_dim)
         output_shape = self.flatten.output_shape(output_shape)
         output_shape = self.transpose.output_shape(output_shape)
+
+        return output_shape
 
 
 class ObservationGroupTokeniser(BaseNets.Module):
@@ -144,7 +159,8 @@ class ObservationGroupTokeniser(BaseNets.Module):
 
     def __init__(
         self,
-        observation_group_shapes,
+        observation_group_shapes: Dict[str, Any],
+        output_dim: int,
         feature_activation=nn.ReLU,
         encoder_kwargs=None,
     ):
@@ -190,6 +206,7 @@ class ObservationGroupTokeniser(BaseNets.Module):
                 obs_shapes=self.observation_group_shapes[obs_group],
                 feature_activation=feature_activation,
                 encoder_kwargs=encoder_kwargs,
+                output_dim=output_dim
             )
 
     def forward(self, **inputs):
@@ -208,7 +225,6 @@ class ObservationGroupTokeniser(BaseNets.Module):
         Returns:
             outputs (torch.Tensor): flat outputs of shape [B, D]
         """
-
         # ensure all observation groups we need are present
         assert set(self.observation_group_shapes.keys()).issubset(inputs), "{} does not contain all observation groups {}".format(
             list(inputs.keys()), list(self.observation_group_shapes.keys())
@@ -222,7 +238,7 @@ class ObservationGroupTokeniser(BaseNets.Module):
                 self.nets[obs_group].forward(inputs[obs_group])
             )
 
-        return torch.cat(outputs, dim=-1)
+        return torch.cat(outputs, dim=1)
 
     def output_shape(self):
         """
@@ -257,8 +273,7 @@ class ObservationTokeniser(BaseNets.Module):
     def __init__(
         self,
         output_dim: int,
-        dropout: float,
-        feature_activation: nn.Module = nn.ReLU
+        feature_activation: nn.Module = nn.ReLU,
     ):
         """
         Args:
@@ -276,7 +291,6 @@ class ObservationTokeniser(BaseNets.Module):
         self._locked = False
         self.lowdim_shape_dict = OrderedDict()
         self.output_dim = output_dim
-        self.dropout = dropout
 
     def register_obs_key(
         self,
@@ -358,7 +372,9 @@ class ObservationTokeniser(BaseNets.Module):
         for k in self.obs_shapes:
             if self.obs_nets_classes[k] is not None:
                 # create net to process this modality
-                self.obs_nets[k] = ObsUtils.OBS_ENCODER_CORES[self.obs_nets_classes[k]](**self.obs_nets_kwargs[k])
+                self.obs_nets[k] = ObsUtils.OBS_ENCODER_CORES[self.obs_nets_classes[k]](
+                    **self.obs_nets_kwargs[k], feature_dimension=self.output_dim
+                )
             elif self.obs_share_mods[k] is not None:
                 # make sure net is shared with another modality
                 self.obs_nets[k] = self.obs_nets[self.obs_share_mods[k]]
@@ -366,7 +382,6 @@ class ObservationTokeniser(BaseNets.Module):
         self.lowdim_tokeniser = LowDimTokeniser(
             lowdim_shape_dict=self.lowdim_shape_dict,
             output_dim=self.output_dim,
-            dropout=self.dropout
         )
 
         self.activation = None
@@ -425,7 +440,7 @@ class ObservationTokeniser(BaseNets.Module):
             list(obs_dict.keys()), list(self.obs_shapes.keys())
         )
 
-        rgb_inds, rgb_inds_need_lang_cond, lang_inds, lang_keys, include_lang_feat, lowdim_inds = self._get_vis_lang_info()
+        rgb_inds, rgb_inds_need_lang_cond, lang_inds, lang_keys, include_lang_feat, lowdim_inds = self._get_vis_lang_lowdim_info()
 
         # process modalities by order given by @self.obs_shapes
         feats = []
@@ -453,14 +468,14 @@ class ObservationTokeniser(BaseNets.Module):
                     x = rand.forward_out(x)
             if ind in lowdim_inds:
                 lowdim_dict[k] = x
-            # flatten to [B, D]
-            feats.append(x)
+            else:
+                feats.append(x)
 
         lowdim_feats = self.lowdim_tokeniser(lowdim_dict)
-        feats = [lowdim_feats] + feats
+        feats = [lowdim_feats[:, None]] + feats
 
         # concatenate all features together
-        return torch.stack(feats, dim=1)
+        return torch.cat(feats, dim=1)
 
 
 class LowDimTokeniser(EncoderCore):
@@ -472,19 +487,22 @@ class LowDimTokeniser(EncoderCore):
         self,
         lowdim_shape_dict: Dict,
         output_dim: int,
-        dropout: int
+        dropout: float = 0.0
     ):
+        input_shape = [sum(
+            shape[0] for shape in lowdim_shape_dict.values()
+        )]
+        super(LowDimTokeniser, self).__init__(input_shape=input_shape)
         self.input_dict = lowdim_shape_dict
-        self.input_shape = sum(
-            input["input_dim"] for input in lowdim_shape_dict.values()
-        )
+        print(self.input_dict)
+        self.input_shape = input_shape
         def approx_gelu(): return nn.GELU(approximate="tanh")
         self.lowdim_encoder = BaseNets.MLP(
-            input_dim=self.input_shape,
+            input_dim=self.input_shape[0],
             output_dim=output_dim,
-            layer_dims=[output_dim],
+            layer_dims=(output_dim,),
             activation=approx_gelu,
-            dropouts=[dropout],
+            dropouts=(dropout,),
             normalization=True,
             output_activation=approx_gelu
         )
@@ -523,11 +541,9 @@ class VisionTokeniser(VisualCore):
     def __init__(
         self,
         input_shape: Sequence[int],
-        dropout: float,
+        dropout: float = 0.0,
         backbone_class: str = "ResNet18Conv",
-        pool_class: str = "SpatialSoftmax",
         backbone_kwargs: Dict[str, Any] = None,
-        pool_kwargs: Dict[str, Any] = None,
         patchify: bool = True,
         feature_dimension: int = 64,
     ):
@@ -536,11 +552,7 @@ class VisionTokeniser(VisualCore):
             input_shape (tuple): shape of input (not including batch dimension)
             backbone_class (str): class name for the visual backbone network. Defaults
                 to "ResNet18Conv".
-            pool_class (str): class name for the visual feature pooler (optional)
-                Common options are "SpatialSoftmax" and "SpatialMeanPool". Defaults to
-                "SpatialSoftmax".
             backbone_kwargs (dict): kwargs for the visual backbone network (optional)
-            pool_kwargs (dict): kwargs for the visual feature pooler (optional)
             flatten (bool): whether to flatten the visual features
             feature_dimension (int): if not None, add a Linear layer to
                 project output into a desired feature dimension
@@ -565,25 +577,7 @@ class VisionTokeniser(VisualCore):
 
         assert isinstance(self.backbone, BaseNets.ConvBase)
 
-        feat_shape = self.backbone.output_shape(input_shape)
         net_list = [self.backbone]
-
-        # maybe make pool net
-        if pool_class is not None:
-            assert isinstance(pool_class, str)
-            # feed output shape of backbone to pool net
-            if pool_kwargs is None:
-                pool_kwargs = dict()
-            # extract only relevant kwargs for this specific backbone
-            pool_kwargs["input_shape"] = feat_shape
-            pool_kwargs = extract_class_init_kwargs_from_dict(cls=eval(pool_class), dic=pool_kwargs, copy=True)
-            self.pool = eval(pool_class)(**pool_kwargs)
-            assert isinstance(self.pool, BaseNets.Module)
-
-            feat_shape = self.pool.output_shape(feat_shape)
-            net_list.append(self.pool)
-        else:
-            self.pool = None
 
         if self.patchify:
             self.patchify_module = Patchify()
@@ -593,11 +587,13 @@ class VisionTokeniser(VisualCore):
         self.feature_dimension = feature_dimension
         token_shape = self.backbone.output_shape(input_shape)
         if self.patchify:
-            token_shape = self.patchify.output_shape(token_shape)
+            token_shape = self.patchify_module.output_shape(token_shape)
         input_dim = token_shape[-1]
 
         def approx_gelu(): return nn.GELU(approximate="tanh")
-
+        print("input_dim:", input_dim)
+        print()
+        print()
         self.projector = BaseNets.MLP(
             input_dim=input_dim,
             output_dim=feature_dimension,
@@ -625,8 +621,6 @@ class VisionTokeniser(VisualCore):
             out_shape ([int]): list of integers corresponding to output shape
         """
         feat_shape = self.backbone.output_shape(input_shape)
-        if self.pool is not None:
-            feat_shape = self.pool.output_shape(feat_shape)
         if self.patchify:
             feat_shape = self.patchify_module.output_shape(feat_shape)
         feat_shape[-1] = self.feature_dimension
@@ -648,7 +642,6 @@ class VisionTokeniser(VisualCore):
         msg += textwrap.indent(
             "\ninput_shape={}\noutput_shape={}".format(self.input_shape, self.output_shape(self.input_shape)), indent)
         msg += textwrap.indent("\nbackbone_net={}".format(self.backbone), indent)
-        msg += textwrap.indent("\npool_net={}".format(self.pool), indent)
         msg += textwrap.indent("\nPatchify={}".format(self.patchify_module), indent)
         msg += textwrap.indent("\nProjector={}".format(self.projector), indent)
         msg = header + '(' + msg + '\n)'

@@ -213,15 +213,16 @@ class Transpose(Module):
         return x.transpose(self.dim1, self.dim2)
 
     def output_shape(self, input_shape: Sequence[int]):
-        max_dim = max(self.dim1, self.dim2)
-        assert max_dim < len(input_shape), f"input dim {input_shape} has less "
-        f"axes than target dims dim1={self.dim1} and dim2={self.dim2}."
-        dim_len1 = input_shape[self.dim1]
-        dim_len2 = input_shape[self.dim2]
+        dim1 = self.dim1-1
+        dim2 = self.dim2-1
+        max_dim = max(dim1, dim2)
+        assert max_dim < len(input_shape), f"input dim {input_shape} has less axes than target dims dim1={dim1} and dim2={dim2}."
+        dim_len1 = input_shape[dim1]
+        dim_len2 = input_shape[dim2]
 
         output_shape = deepcopy(input_shape)
-        output_shape[self.dim1] = dim_len2
-        output_shape[self.dim2] = dim_len1
+        output_shape[dim1] = dim_len2
+        output_shape[dim2] = dim_len1
 
         return output_shape
 
@@ -243,9 +244,11 @@ class Flatten(Module):
         else:
             end_dim = self.end_dim
         suffix = input_dim[end_dim+1:]
-        mid = [int(np.prod(input_dim[self.start_dim:self.end_dim]))]
+        mid = input_dim[self.start_dim:end_dim+1]
+        mid = [int(np.prod(mid))]
+        output_shape = prefix + mid + suffix
 
-        return prefix + mid + suffix
+        return output_shape
 
 
 class MLP(Module):

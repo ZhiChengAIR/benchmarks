@@ -206,7 +206,7 @@ class Algo(object):
 
         Returns:
             input_batch (dict): processed and filtered batch that
-                will be used for training 
+                will be used for training
         """
         return batch
 
@@ -222,8 +222,8 @@ class Algo(object):
                 training will occur (after @process_batch_for_training
                 is called)
 
-            obs_normalization_stats (dict or None): if provided, this should map observation 
-                keys to dicts with a "mean" and "std" of shape (1, ...) where ... is the 
+            obs_normalization_stats (dict or None): if provided, this should map observation
+                keys to dicts with a "mean" and "std" of shape (1, ...) where ... is the
                 default shape for the observation.
 
         Returns:
@@ -282,7 +282,7 @@ class Algo(object):
         # LR scheduling updates
         if hasattr(self, 'step_lr_schedulers_every_batch'):
             for k, v in self.step_lr_schedulers_every_batch.items():
-                if v and self.lr_schedulers[k] is not None: 
+                if v and self.lr_schedulers[k] is not None:
                     self.lr_schedulers[k].step()
 
     def log_info(self, info):
@@ -311,7 +311,7 @@ class Algo(object):
         """
         # LR scheduling updates
         for k, v in self.step_lr_schedulers_every_batch.items():
-            if not v and self.lr_schedulers[k] is not None: 
+            if not v and self.lr_schedulers[k] is not None:
                 self.lr_schedulers[k].step()
 
     def set_eval(self):
@@ -385,7 +385,7 @@ class PolicyAlgo(Algo):
             action (torch.Tensor): action tensor
         """
         raise NotImplementedError
-    
+
 
 class ValueAlgo(Algo):
     """
@@ -523,7 +523,7 @@ class RolloutPolicy(object):
         Prepare raw observation dict from environment for policy.
 
         Args:
-            ob (dict): single observation dictionary from environment (no batch dimension, 
+            ob (dict): single observation dictionary from environment (no batch dimension,
                 and np.array values for each key)
 
             batched_ob (bool): whether the input is already batched
@@ -558,7 +558,7 @@ class RolloutPolicy(object):
         Produce action from raw observation dict (and maybe goal dict) from environment.
 
         Args:
-            ob (dict): single observation dictionary from environment (no batch dimension, 
+            ob (dict): single observation dictionary from environment (no batch dimension,
                 and np.array values for each key)
             goal (dict): goal observation
             batched_ob (bool): whether the input is already batched

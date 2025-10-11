@@ -1,5 +1,5 @@
 """
-Implementation of Diffusion Policy https://diffusion-policy.cs.columbia.edu/ by Cheng Chi
+Implementation of EBT Policy https://diffusion-policy.cs.columbia.edu/ by Cheng Chi
 """
 from typing import Callable, Union
 from collections import OrderedDict, deque
@@ -7,13 +7,13 @@ from packaging.version import parse as parse_version
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# requires diffusers==0.11.1
+from einops import rearrange
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel
 
 import robomimic.models.obs_tokenisers as ObsTok
-import robomimic.models.diffusion_policy_nets as DPNets
+import robomimic.models.ebt_policy_nets as EBTNets
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
@@ -45,20 +45,17 @@ class EBTPolicy(PolicyAlgo):
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         encoder_kwargs = ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder)
-
         obs_encoder = ObsTok.ObservationGroupTokeniser(
             observation_group_shapes=observation_group_shapes,
             encoder_kwargs=encoder_kwargs,
+            output_dim=self.algo_config.transformer.embed_dim
         )
         # IMPORTANT!
         # replace all BatchNorm with GroupNorm to work with EMA
         # performance will tank if you forget to do this!
         obs_encoder = replace_bn_with_gn(obs_encoder)
 
-        obs_dim = obs_encoder.output_shape()[0]
-
-        obs_temporal_encoder = DPNets.ObsTemporalEncoder(
-            input_dim=obs_dim,
+        obs_temporal_encoder = EBTNets.ObsTemporalEncoder(
             embed_dim=self.algo_config.transformer.embed_dim,
             num_layers=self.algo_config.transformer.num_layers,
             num_heads=self.algo_config.transformer.num_heads,
@@ -67,7 +64,7 @@ class EBTPolicy(PolicyAlgo):
             proj_dropout=self.algo_config.transformer.proj_dropout
         )
         # create network object
-        noise_pred_net = DPNets.DiffusionTransformer(
+        noise_pred_net = EBTNets.EBTTransformer(
             input_dim=self.ac_dim,
             cond_dim=self.algo_config.transformer.embed_dim,
             embed_dim=self.algo_config.transformer.embed_dim,
@@ -153,7 +150,7 @@ class EBTPolicy(PolicyAlgo):
             in_range = (-1 <= actions) & (actions <= 1)
             all_in_range = torch.all(in_range).item()
             if not all_in_range:
-                raise ValueError("'actions' must be in range [-1,1] for Diffusion Policy! Check if hdf5_normalize_action is enabled.")
+                raise ValueError("'actions' must be in range [-1,1] for EBT Policy! Check if hdf5_normalize_action is enabled.")
             self.action_check_done = True
 
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
@@ -179,7 +176,7 @@ class EBTPolicy(PolicyAlgo):
 
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
-            info = super(DiffusionPolicyTransformer, self).train_on_batch(batch, epoch, validate=validate)
+            info = super(EBTPolicy, self).train_on_batch(batch, epoch, validate=validate)
             actions = batch["actions"]
 
             # encode obs
@@ -192,6 +189,7 @@ class EBTPolicy(PolicyAlgo):
                 assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
 
             obs_features = TensorUtils.time_distributed(inputs, self.nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
+            obs_features = rearrange(obs_features, "b t n d -> b (t n) d")
             assert obs_features.ndim == 3  # [B, T, D]
             obs_cond = self.nets["policy"]["obs_temporal_encoder"](
                 obs_features
@@ -254,7 +252,7 @@ class EBTPolicy(PolicyAlgo):
         Returns:
             loss_log (dict): name -> summary statistic
         """
-        log = super(DiffusionPolicyTransformer, self).log_info(info)
+        log = super(EBTPolicy, self).log_info(info)
         log["Loss"] = info["losses"]["l2_loss"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]

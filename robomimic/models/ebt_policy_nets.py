@@ -26,7 +26,6 @@ class SinusoidalPosEmb(nn.Module):
 class ObsTemporalEncoder(nn.Module):
     def __init__(
         self,
-        input_dim,
         embed_dim,
         attn_dropout,
         proj_dropout,
@@ -47,9 +46,6 @@ class ObsTemporalEncoder(nn.Module):
 
         super().__init__()
         # input embedding stem
-        self.input_emb = nn.Linear(input_dim, embed_dim)
-        self.input_pos_emb = nn.Parameter(torch.zeros(1, n_obs_steps, embed_dim))
-
         self.encoder = SpatioTemporalEncoder(
             dim=embed_dim,
             depth=num_layers,
@@ -59,10 +55,6 @@ class ObsTemporalEncoder(nn.Module):
             proj_drop=proj_dropout,
             n_obs_steps=n_obs_steps
         )
-        mask = torch.tril(torch.ones(n_obs_steps, n_obs_steps)).view(
-            1, 1, n_obs_steps, n_obs_steps
-        )
-        self.register_buffer("mask", mask)
 
         print("number of parameters: {:e}".format(
             sum(p.numel() for p in self.parameters()))
