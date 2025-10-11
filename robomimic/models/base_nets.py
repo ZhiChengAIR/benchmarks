@@ -8,13 +8,14 @@ import abc
 import numpy as np
 import textwrap
 from collections import OrderedDict
+from typing import Sequence
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 from torchvision import models as vision_models
-from torchvision import transforms
 
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
@@ -210,6 +211,58 @@ class Transpose(Module):
 
     def forward(self, x):
         return x.transpose(self.dim1, self.dim2)
+
+    def output_shape(self, input_shape: Sequence[int]):
+        max_dim = max(self.dim1, self.dim2)
+        assert max_dim < len(input_shape), f"input dim {input_shape} has less "
+        f"axes than target dims dim1={self.dim1} and dim2={self.dim2}."
+        dim_len1 = input_shape[self.dim1]
+        dim_len2 = input_shape[self.dim2]
+
+        output_shape = deepcopy(input_shape)
+        output_shape[self.dim1] = dim_len2
+        output_shape[self.dim2] = dim_len1
+
+        return output_shape
+
+
+class Flatten(Module):
+
+    def __init__(self, start_dim: int, end_dim: int):
+        super(Flatten, self).__init__()
+        self.start_dim = start_dim
+        self.end_dim = end_dim
+
+    def forward(self, x):
+        return torch.flatten(x, self.start_dim, self.end_dim)
+
+    def output_shape(self, input_dim: Sequence[int]):
+        prefix = input_dim[:self.start_dim]
+        if self.end_dim < 0:
+            end_dim = len(input_dim) + self.end_dim
+        else:
+            end_dim = self.end_dim
+        suffix = input_dim[end_dim+1:]
+        mid = [int(np.prod(input_dim[self.start_dim:self.end_dim]))]
+
+        return prefix + mid + suffix
+
+
+class Patchify(Module):
+    def __init__(self):
+        self.flatten = Flatten(start_dim=2, end_dim=-1)
+        self.transpose = Transpose(dim1=1, dim2=2)
+
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.transpose(x)
+
+        return x
+
+    def output_shape(self, input_dim):
+        output_shape = deepcopy(input_dim)
+        output_shape = self.flatten.output_shape(output_shape)
+        output_shape = self.transpose.output_shape(output_shape)
 
 
 class MLP(Module):

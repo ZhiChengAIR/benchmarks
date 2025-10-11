@@ -13,7 +13,7 @@ from typing import Dict
 import torch
 import torch.nn as nn
 
-import robomimic.models.base_nets as BaseNets, MLP
+import robomimic.models.base_nets as BaseNets
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
 from robomimic.utils.python_utils import extract_class_init_kwargs_from_dict
@@ -183,57 +183,6 @@ class VisualCore(EncoderCore, BaseNets.ConvBase):
             "\ninput_shape={}\noutput_shape={}".format(self.input_shape, self.output_shape(self.input_shape)), indent)
         msg += textwrap.indent("\nbackbone_net={}".format(self.backbone), indent)
         msg += textwrap.indent("\npool_net={}".format(self.pool), indent)
-        msg = header + '(' + msg + '\n)'
-        return msg
-
-
-class LowDimCore(EncoderCore):
-    """
-    Encodes all lowdim data into a single embedding.
-    """
-
-    def __init__(
-        self,
-        lowdim_shape_dict: Dict,
-        output_dim: int,
-        dropout: int
-    ):
-        self.input_dict = lowdim_shape_dict
-        self.input_shape = sum(
-            input["input_dim"] for input in lowdim_shape_dict.values()
-        )
-        def approx_gelu(): return nn.GELU(approximate="tanh")
-        self.lowdim_encoder = MLP(
-            input_dim=self.input_shape,
-            output_dim=output_dim,
-            layer_dims=[output_dim],
-            activation=approx_gelu,
-            dropouts=[dropout],
-            normalization=True,
-            output_activation=approx_gelu
-        )
-
-    def forward(
-        self,
-        lowdim_dict: Dict
-    ):
-        lowdim_keys = sorted(lowdim_dict.keys())
-        lowdim = torch.cat([lowdim_dict[key] for key in lowdim_keys], dim=-1)
-        lowdim_emb = self.lowdim_encoder(lowdim)
-
-        return lowdim_emb
-
-    def output_shape(self, input_shape: int = None):
-        return self.lowdim_encoder.output_shape()
-
-    def __repr__(self):
-        """Pretty print network."""
-        header = '{}'.format(str(self.__class__.__name__))
-        msg = ''
-        indent = ' ' * 2
-        msg += textwrap.indent(
-            "\ninput_shape={}\noutput_shape={}".format(self.input_shape, self.output_shape(self.input_shape)), indent)
-        msg += textwrap.indent("\nencoder_net={}".format(self.lowdim_encoder), indent)
         msg = header + '(' + msg + '\n)'
         return msg
 
