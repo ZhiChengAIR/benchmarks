@@ -2,7 +2,6 @@
 Contains torch Modules for observation tokenisers
 such as encoders (e.g. LowDimTokeniser, VisionTokeniser, ...)
 """
-import numpy as np
 import textwrap
 from typing import Dict, Any, Sequence
 from collections import OrderedDict
@@ -10,16 +9,108 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-import torchvision.transforms.functional as TVF
+import numpy as np
 from torchvision.transforms import Lambda, Compose
 
 import robomimic.models.base_nets as BaseNets
-import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.obs_utils as ObsUtils
+import robomimic.utils.lang_utils as LangUtils
 from robomimic.utils.python_utils import extract_class_init_kwargs_from_dict
 
 # NOTE: this is required for the backbone classes to be found by the `eval` call in the core networks
-from robomimic.models.obs_core import EncoderCore, VisualCore
+from robomimic.models.obs_core import (
+    EncoderCore,
+    VisualCore,
+    VisualCoreLanguageConditioned
+)
+
+
+def obs_tokeniser_factory(
+        obs_shapes,
+        feature_activation=nn.ReLU,
+        encoder_kwargs=None,
+    ):
+    """
+    Utility function to create an @ObservationTokeniser from kwargs specified in config.
+
+    Args:
+        obs_shapes (OrderedDict): a dictionary that maps observation key to
+            expected shapes for observations.
+
+        feature_activation: non-linearity to apply after each obs net - defaults to ReLU. Pass
+            None to apply no activation.
+
+        encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied. Otherwise, should be
+            nested dictionary containing relevant per-modality information for encoder networks.
+            Should be of form:
+
+            obs_modality1: dict
+                feature_dimension: int
+                core_class: str
+                core_kwargs: dict
+                    ...
+                    ...
+                obs_randomizer_class: str
+                obs_randomizer_kwargs: dict
+                    ...
+                    ...
+            obs_modality2: dict
+                ...
+    """
+    enc = ObservationTokeniser(feature_activation=feature_activation)
+    for k, obs_shape in obs_shapes.items():
+        obs_modality = ObsUtils.OBS_KEYS_TO_MODALITIES[k]
+        enc_kwargs = deepcopy(ObsUtils.DEFAULT_ENCODER_KWARGS[obs_modality]) if encoder_kwargs is None else \
+            deepcopy(encoder_kwargs[obs_modality])
+
+        # Sanity check for kwargs in case they don't exist / are None
+        if enc_kwargs.get("core_kwargs", None) is None:
+            enc_kwargs["core_kwargs"] = {}
+        # Add in input shape info
+        enc_kwargs["core_kwargs"]["input_shape"] = obs_shape
+        # If group class is specified, then make sure corresponding kwargs only contain relevant kwargs
+        if enc_kwargs["core_class"] is not None:
+            enc_kwargs["core_kwargs"] = extract_class_init_kwargs_from_dict(
+                cls=ObsUtils.OBS_ENCODER_CORES[enc_kwargs["core_class"]],
+                dic=enc_kwargs["core_kwargs"],
+                copy=False,
+            )
+
+        # Add in input shape info
+        randomizers = []
+        obs_randomizer_class_list = enc_kwargs["obs_randomizer_class"]
+        obs_randomizer_kwargs_list = enc_kwargs["obs_randomizer_kwargs"]
+
+        if not isinstance(obs_randomizer_class_list, list):
+            obs_randomizer_class_list = [obs_randomizer_class_list]
+
+        if not isinstance(obs_randomizer_kwargs_list, list):
+            obs_randomizer_kwargs_list = [obs_randomizer_kwargs_list]
+
+        rand_input_shape = obs_shape
+        for rand_class, rand_kwargs in zip(obs_randomizer_class_list, obs_randomizer_kwargs_list):
+            rand = None
+            if rand_class is not None:
+                rand_kwargs["input_shape"] = rand_input_shape
+                rand_kwargs = extract_class_init_kwargs_from_dict(
+                    cls=ObsUtils.OBS_RANDOMIZERS[rand_class],
+                    dic=rand_kwargs,
+                    copy=False,
+                )
+                rand = ObsUtils.OBS_RANDOMIZERS[rand_class](**rand_kwargs)
+                rand_input_shape = rand.output_shape_in(rand_input_shape)
+            randomizers.append(rand)
+
+        enc.register_obs_key(
+            name=k,
+            shape=obs_shape,
+            net_class=enc_kwargs["core_class"],
+            net_kwargs=enc_kwargs["core_kwargs"],
+            randomizers=randomizers,
+        )
+
+    enc.make()
+    return enc
 
 
 class Patchify(BaseNets.Module):
@@ -37,6 +128,122 @@ class Patchify(BaseNets.Module):
         output_shape = deepcopy(input_dim)
         output_shape = self.flatten.output_shape(output_shape)
         output_shape = self.transpose.output_shape(output_shape)
+
+
+class ObservationGroupTokeniser(BaseNets.Module):
+    """
+    This class allows networks to encode multiple observation dictionaries into a single
+    flat, concatenated vector representation. It does this by assigning each observation
+    dictionary (observation group) an @ObservationTokeniser object.
+
+    The class takes a dictionary of dictionaries, @observation_group_shapes.
+    Each key corresponds to a observation group (e.g. 'obs', 'subgoal', 'goal')
+    and each OrderedDict should be a map between modalities and
+    expected input shapes (e.g. { 'image' : (3, 120, 160) }).
+    """
+
+    def __init__(
+        self,
+        observation_group_shapes,
+        feature_activation=nn.ReLU,
+        encoder_kwargs=None,
+    ):
+        """
+        Args:
+            observation_group_shapes (OrderedDict): a dictionary of dictionaries.
+                Each key in this dictionary should specify an observation group, and
+                the value should be an OrderedDict that maps modalities to
+                expected shapes.
+
+            feature_activation: non-linearity to apply after each obs net - defaults to ReLU. Pass
+                None to apply no activation.
+
+            encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied. Otherwise, should
+                be nested dictionary containing relevant per-modality information for encoder networks.
+                Should be of form:
+
+                obs_modality1: dict
+                    feature_dimension: int
+                    core_class: str
+                    core_kwargs: dict
+                        ...
+                        ...
+                    obs_randomizer_class: str
+                    obs_randomizer_kwargs: dict
+                        ...
+                        ...
+                obs_modality2: dict
+                    ...
+        """
+        super(ObservationGroupTokeniser, self).__init__()
+
+        # type checking
+        assert isinstance(observation_group_shapes, OrderedDict)
+        assert np.all([isinstance(observation_group_shapes[k], OrderedDict) for k in observation_group_shapes])
+
+        self.observation_group_shapes = observation_group_shapes
+
+        # create an observation encoder per observation group
+        self.nets = nn.ModuleDict()
+        for obs_group in self.observation_group_shapes:
+            self.nets[obs_group] = obs_tokeniser_factory(
+                obs_shapes=self.observation_group_shapes[obs_group],
+                feature_activation=feature_activation,
+                encoder_kwargs=encoder_kwargs,
+            )
+
+    def forward(self, **inputs):
+        """
+        Process each set of inputs in its own observation group.
+
+        Args:
+            inputs (dict): dictionary that maps observation groups to observation
+                dictionaries of torch.Tensor batches that agree with
+                @self.observation_group_shapes. All observation groups in
+                @self.observation_group_shapes must be present, but additional
+                observation groups can also be present. Note that these are specified
+                as kwargs for ease of use with networks that name each observation
+                stream in their forward calls.
+
+        Returns:
+            outputs (torch.Tensor): flat outputs of shape [B, D]
+        """
+
+        # ensure all observation groups we need are present
+        assert set(self.observation_group_shapes.keys()).issubset(inputs), "{} does not contain all observation groups {}".format(
+            list(inputs.keys()), list(self.observation_group_shapes.keys())
+        )
+
+        outputs = []
+        # Deterministic order since self.observation_group_shapes is OrderedDict
+        for obs_group in self.observation_group_shapes:
+            # pass through encoder
+            outputs.append(
+                self.nets[obs_group].forward(inputs[obs_group])
+            )
+
+        return torch.cat(outputs, dim=-1)
+
+    def output_shape(self):
+        """
+        Compute the output shape of this encoder.
+        """
+        feat_dim = 0
+        for obs_group in self.observation_group_shapes:
+            # get feature dimension of these keys
+            feat_dim += self.nets[obs_group].output_shape()[0]
+        return [feat_dim]
+
+    def __repr__(self):
+        """Pretty print network."""
+        header = '{}'.format(str(self.__class__.__name__))
+        msg = ''
+        for k in self.observation_group_shapes:
+            msg += '\n'
+            indent = ' ' * 4
+            msg += textwrap.indent("group={}\n{}".format(k, self.nets[k]), indent)
+        msg = header + '(' + msg + '\n)'
+        return msg
 
 
 class ObservationTokeniser(BaseNets.Module):
@@ -156,35 +363,19 @@ class ObservationTokeniser(BaseNets.Module):
                 # make sure net is shared with another modality
                 self.obs_nets[k] = self.obs_nets[self.obs_share_mods[k]]
 
-            if ObsUtils.OBS_KEYS_TO_MODALITIES[k] == "rgb":
-                rgb_output_dim = self.obs_nets[k].output_shape(
-                    input_shape=self.obs_nets_kwargs[k]["input_shape"]
-                )
-
         self.lowdim_tokeniser = LowDimTokeniser(
             lowdim_shape_dict=self.lowdim_shape_dict,
             output_dim=self.output_dim,
             dropout=self.dropout
         )
 
-        def approx_gelu(): return nn.GELU(approximate="tanh")
-        self.rgb_projector = BaseNets.MLP(
-            input_dim=self.input_shape,
-            output_dim=rgb_output_dim,
-            layer_dims=[rgb_output_dim],
-            activation=approx_gelu,
-            dropouts=[self.dropout],
-            normalization=True,
-            output_activation=approx_gelu
-        )
-
         self.activation = None
         if self.feature_activation is not None:
             self.activation = self.feature_activation()
 
-    def _get_vis_lang_info(self):
+    def _get_vis_lang_lowdim_info(self):
         """
-        Helper function to extract information on vision and language keys.
+        Helper function to extract information on vision, language and lowdim keys.
         """
 
         # get the indices that correspond to RGB and lang
@@ -192,6 +383,7 @@ class ObservationTokeniser(BaseNets.Module):
         rgb_inds_need_lang_cond = []
         lang_inds = []
         lang_keys = []
+        lowdim_inds = []
         for ind, k in enumerate(self.obs_shapes):
             if ObsUtils.key_is_obs_modality(key=k, obs_modality="rgb"):
                 rgb_inds.append(ind)
@@ -200,13 +392,15 @@ class ObservationTokeniser(BaseNets.Module):
             elif k == LangUtils.LANG_EMB_OBS_KEY:
                 lang_inds.append(ind)
                 lang_keys.append(k)
+            elif ObsUtils.key_is_obs_modality(key=k, obs_modality="low_dim"):
+                lowdim_inds.append(ind)
         assert len(lang_inds) <= 1
 
         # whether language features should be included in network features
         include_lang_feat = True
         if (len(rgb_inds_need_lang_cond) > 0):
             include_lang_feat = False
-        return rgb_inds, rgb_inds_need_lang_cond, lang_inds, lang_keys, include_lang_feat
+        return rgb_inds, rgb_inds_need_lang_cond, lang_inds, lang_keys, include_lang_feat, lowdim_inds
 
     def forward(self, obs_dict):
         """
@@ -231,10 +425,11 @@ class ObservationTokeniser(BaseNets.Module):
             list(obs_dict.keys()), list(self.obs_shapes.keys())
         )
 
-        rgb_inds, rgb_inds_need_lang_cond, lang_inds, lang_keys, include_lang_feat = self._get_vis_lang_info()
+        rgb_inds, rgb_inds_need_lang_cond, lang_inds, lang_keys, include_lang_feat, lowdim_inds = self._get_vis_lang_info()
 
         # process modalities by order given by @self.obs_shapes
         feats = []
+        lowdim_dict = {}
         for ind, k in enumerate(self.obs_shapes):
             # maybe skip language input
             if (not include_lang_feat) and (ind in lang_inds):
@@ -256,12 +451,16 @@ class ObservationTokeniser(BaseNets.Module):
             for rand in reversed(self.obs_randomizers[k]):
                 if rand is not None:
                     x = rand.forward_out(x)
+            if ind in lowdim_inds:
+                lowdim_dict[k] = x
             # flatten to [B, D]
-            x = TensorUtils.flatten(x, begin_axis=1)
             feats.append(x)
 
+        lowdim_feats = self.lowdim_tokeniser(lowdim_dict)
+        feats = [lowdim_feats] + feats
+
         # concatenate all features together
-        return torch.cat(feats, dim=-1)
+        return torch.stack(feats, dim=1)
 
 
 class LowDimTokeniser(EncoderCore):
@@ -450,6 +649,8 @@ class VisionTokeniser(VisualCore):
             "\ninput_shape={}\noutput_shape={}".format(self.input_shape, self.output_shape(self.input_shape)), indent)
         msg += textwrap.indent("\nbackbone_net={}".format(self.backbone), indent)
         msg += textwrap.indent("\npool_net={}".format(self.pool), indent)
+        msg += textwrap.indent("\nPatchify={}".format(self.patchify_module), indent)
+        msg += textwrap.indent("\nProjector={}".format(self.projector), indent)
         msg = header + '(' + msg + '\n)'
 
         return msg

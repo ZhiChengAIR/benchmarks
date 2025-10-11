@@ -248,23 +248,6 @@ class Flatten(Module):
         return prefix + mid + suffix
 
 
-class Patchify(Module):
-    def __init__(self):
-        self.flatten = Flatten(start_dim=2, end_dim=-1)
-        self.transpose = Transpose(dim1=1, dim2=2)
-
-    def forward(self, x):
-        x = self.flatten(x)
-        x = self.transpose(x)
-
-        return x
-
-    def output_shape(self, input_dim):
-        output_shape = deepcopy(input_dim)
-        output_shape = self.flatten.output_shape(output_shape)
-        output_shape = self.transpose.output_shape(output_shape)
-
-
 class MLP(Module):
     """
     Base class for simple Multi-Layer Perceptrons.

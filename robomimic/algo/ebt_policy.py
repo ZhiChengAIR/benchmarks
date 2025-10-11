@@ -1,39 +1,27 @@
 """
 Implementation of Diffusion Policy https://diffusion-policy.cs.columbia.edu/ by Cheng Chi
 """
-from typing import Callable, Union, Sequence
-import math
+from typing import Callable, Union
 from collections import OrderedDict, deque
 from packaging.version import parse as parse_version
-import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # requires diffusers==0.11.1
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel
 
-import robomimic.models.obs_nets as ObsNets
-import robomimic.models.eb_policy_nets as EBNets
+import robomimic.models.obs_tokenisers as ObsTok
+import robomimic.models.diffusion_policy_nets as DPNets
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
 
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
-import random
-import robomimic.utils.torch_utils as TorchUtils
-import robomimic.utils.tensor_utils as TensorUtils
-import robomimic.utils.obs_utils as ObsUtils
 
-
-def mean_flat(x):
-    """
-    Take the mean over all non-batch dimensions.
-    """
-    return x.mean(dim=list(range(1, len(x.shape))))
-
-
-@register_algo_factory_func("diffusion_policy")
+@register_algo_factory_func("ebt_policy")
 def algo_config_to_class(algo_config):
     """
     Maps algo config to the BC algo class to instantiate, along with additional algo kwargs.
@@ -45,16 +33,10 @@ def algo_config_to_class(algo_config):
         algo_class: subclass of Algo
         algo_kwargs (dict): dictionary of additional kwargs to pass to algorithm
     """
-
-    if algo_config.unet.enabled:
-        return EBPolicyUNet, {}
-    elif algo_config.transformer.enabled:
-        raise NotImplementedError()
-    else:
-        raise RuntimeError()
+    return EBTPolicy, {}
 
 
-class EBPolicyUNet(PolicyAlgo):
+class EBTPolicy(PolicyAlgo):
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -64,7 +46,7 @@ class EBPolicyUNet(PolicyAlgo):
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         encoder_kwargs = ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder)
 
-        obs_encoder = ObsNets.ObservationGroupEncoder(
+        obs_encoder = ObsTok.ObservationGroupTokeniser(
             observation_group_shapes=observation_group_shapes,
             encoder_kwargs=encoder_kwargs,
         )
@@ -75,17 +57,35 @@ class EBPolicyUNet(PolicyAlgo):
 
         obs_dim = obs_encoder.output_shape()[0]
 
+        obs_temporal_encoder = DPNets.ObsTemporalEncoder(
+            input_dim=obs_dim,
+            embed_dim=self.algo_config.transformer.embed_dim,
+            num_layers=self.algo_config.transformer.num_layers,
+            num_heads=self.algo_config.transformer.num_heads,
+            n_obs_steps=self.algo_config.horizon.observation_horizon,
+            attn_dropout=self.algo_config.transformer.attn_dropout,
+            proj_dropout=self.algo_config.transformer.proj_dropout
+        )
         # create network object
-        energy_pred_net = EBNets.ConditionalUnet1D(
+        noise_pred_net = DPNets.DiffusionTransformer(
             input_dim=self.ac_dim,
-            global_cond_dim=obs_dim*self.algo_config.horizon.observation_horizon
+            cond_dim=self.algo_config.transformer.embed_dim,
+            embed_dim=self.algo_config.transformer.embed_dim,
+            output_dim=self.ac_dim,
+            num_layers=self.algo_config.transformer.num_layers,
+            num_heads=self.algo_config.transformer.num_heads,
+            attn_dropout=self.algo_config.transformer.attn_dropout,
+            proj_dropout=self.algo_config.transformer.proj_dropout,
+            n_obs_steps=self.algo_config.horizon.observation_horizon,
+            horizon=self.algo_config.horizon.prediction_horizon
         )
 
         # the final arch has 2 parts
         nets = nn.ModuleDict({
             "policy": nn.ModuleDict({
                 "obs_encoder": obs_encoder,
-                "energy_pred_net": energy_pred_net
+                "obs_temporal_encoder": obs_temporal_encoder,
+                "noise_pred_net": noise_pred_net
             })
         })
 
@@ -93,6 +93,25 @@ class EBPolicyUNet(PolicyAlgo):
 
         # setup noise scheduler
         noise_scheduler = None
+        if self.algo_config.ddpm.enabled:
+            noise_scheduler = DDPMScheduler(
+                num_train_timesteps=self.algo_config.ddpm.num_train_timesteps,
+                beta_schedule=self.algo_config.ddpm.beta_schedule,
+                clip_sample=self.algo_config.ddpm.clip_sample,
+                prediction_type=self.algo_config.ddpm.prediction_type
+            )
+        elif self.algo_config.ddim.enabled:
+            noise_scheduler = DDIMScheduler(
+                num_train_timesteps=self.algo_config.ddim.num_train_timesteps,
+                beta_schedule=self.algo_config.ddim.beta_schedule,
+                clip_sample=self.algo_config.ddim.clip_sample,
+                set_alpha_to_one=self.algo_config.ddim.set_alpha_to_one,
+                steps_offset=self.algo_config.ddim.steps_offset,
+                prediction_type=self.algo_config.ddim.prediction_type
+            )
+        else:
+            raise RuntimeError()
+
         # setup EMA
         ema = None
         if self.algo_config.ema.enabled:
@@ -105,9 +124,6 @@ class EBPolicyUNet(PolicyAlgo):
         self.action_check_done = False
         self.obs_queue = None
         self.action_queue = None
-        self.num_mcmc_steps = 3
-        self.alpha = 1000
-        self.inf_mode = False
 
     def process_batch_for_training(self, batch):
         """
@@ -159,128 +175,73 @@ class EBPolicyUNet(PolicyAlgo):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
-        To = self.algo_config.horizon.observation_horizon
-        Ta = self.algo_config.horizon.action_horizon
-        Tp = self.algo_config.horizon.prediction_horizon
-        action_dim = self.ac_dim
         B = batch["actions"].shape[0]
 
-        info = super(EBPolicyUNet, self).train_on_batch(batch, epoch, validate=validate)
-        actions = batch["actions"]
-        predicted_energies_list = []
-        predicted_traj_list = []
 
-        # encode obs
-        inputs = {
-            "obs": batch["obs"],
-            "goal": batch["goal_obs"]
-        }
-        for k in self.obs_shapes:
-            # first two dimensions should be [B, T] for inputs
-            assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
+        with TorchUtils.maybe_no_grad(no_grad=validate):
+            info = super(DiffusionPolicyTransformer, self).train_on_batch(batch, epoch, validate=validate)
+            actions = batch["actions"]
 
-        obs_features = TensorUtils.time_distributed(inputs, self.nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
-        assert obs_features.ndim == 3  # [B, T, D]
+            # encode obs
+            inputs = {
+                "obs": batch["obs"],
+                "goal": batch["goal_obs"]
+            }
+            for k in self.obs_shapes:
+                # first two dimensions should be [B, T] for inputs
+                assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
 
-        obs_cond = obs_features.flatten(start_dim=1)
+            obs_features = TensorUtils.time_distributed(inputs, self.nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
+            assert obs_features.ndim == 3  # [B, T, D]
+            obs_cond = self.nets["policy"]["obs_temporal_encoder"](
+                obs_features
+            )
 
-        # sample noise to add to actions
-        noise = torch.randn(actions.shape, device=self.device)
+            # sample noise to add to actions
+            noise = torch.randn(actions.shape, device=self.device)
 
-        with torch.set_grad_enabled(True):
-            for i in range(self.num_mcmc_steps):
-                actions = self.energy_step(
-                    actions,
-                    obs_cond,
-                    i,
-                    predicted_energies_list,
-                    predicted_traj_list
+            # sample a diffusion iteration for each data point
+            timesteps = torch.randint(
+                0, self.noise_scheduler.config.num_train_timesteps,
+                (B,), device=self.device
+            ).long()
+
+            # add noise to the clean actions according to the noise magnitude at each diffusion iteration
+            # (this is the forward diffusion process)
+            noisy_actions = self.noise_scheduler.add_noise(
+                actions, noise, timesteps)
+
+            # predict the noise residual
+            noise_pred = self.nets["policy"]["noise_pred_net"](
+                noisy_actions, timesteps, obs_cond)
+
+            # L2 loss
+            loss = F.mse_loss(noise_pred, noise)
+
+            # logging
+            losses = {
+                "l2_loss": loss
+            }
+            info["losses"] = TensorUtils.detach(losses)
+
+            if not validate:
+                # gradient step
+                policy_grad_norms = TorchUtils.backprop_for_loss(
+                    net=self.nets,
+                    optim=self.optimizers["policy"],
+                    loss=loss,
                 )
 
-        reconstruction_loss = 0
-        total_mcmc_steps = len(predicted_energies_list)
-        for mcmc_step, (predicted_embeddings, predicted_energy) in enumerate(zip(predicted_traj_list, predicted_energies_list)):
-            # loss calculations
-            reconstruction_loss += F.smooth_l1_loss(
-                predicted_embeddings,
-                actions
-            )
+                # update Exponential Moving Average of the model weights
+                if self.ema is not None:
+                    self.ema.step(self.nets)
 
-        loss = reconstruction_loss
-
-
-        # logging
-        losses = {
-            "l2_loss": loss
-        }
-        info["losses"] = TensorUtils.detach(losses)
-
-        if not validate:
-            # gradient step
-            policy_grad_norms = TorchUtils.backprop_for_loss(
-                net=self.nets,
-                optim=self.optimizers["policy"],
-                loss=loss,
-            )
-
-            # update Exponential Moving Average of the model weights
-            if self.ema is not None:
-                self.ema.step(self.nets)
-
-            step_info = {
-                "policy_grad_norms": policy_grad_norms
-            }
-            info.update(step_info)
+                step_info = {
+                    "policy_grad_norms": policy_grad_norms
+                }
+                info.update(step_info)
 
         return info
-
-    def energy_step(
-        self,
-        trajectory: torch.Tensor,
-        obs_cond: torch.Tensor,
-        noise: torch.Tensor,
-        i: int,
-        predicted_energies_list: Sequence,
-        predicted_traj_list: Sequence
-    ):
-        trajectory = trajectory.detach().requires_grad_()
-        # predict the noise residual
-        energy_pred = self.nets["policy"]["energy_pred_net"](
-            noise, global_cond=obs_cond)
-
-        predicted_energies_list.append(energy_pred)
-
-        predicted_traj_grad = self._compute_grad(
-            energy_preds=energy_pred,
-            trajectory=trajectory,
-            step_no=i,
-            num_mcmc_steps=self.num_mcmc_steps
-        )
-
-        trajectory = trajectory - self.alpha * predicted_traj_grad
-
-        predicted_traj_list.append(trajectory)
-
-        return trajectory
-
-    def _compute_grad(
-        self,
-        energy_preds: torch.Tensor,
-        trajectory: torch.Tensor,
-        step_no: int,
-        num_mcmc_steps: int
-    ):
-        predicted_traj_grad = torch.autograd.grad(
-            outputs=energy_preds.sum(),
-            inputs=trajectory,
-            create_graph=(not self.inf_mode)
-        )[0]
-
-        if torch.isnan(predicted_traj_grad).any() \
-           or torch.isinf(predicted_traj_grad).any():
-            raise ValueError("NaN or Inf gradients detected during MCMC.")
-
-        return predicted_traj_grad
 
     def log_info(self, info):
         """
@@ -293,7 +254,7 @@ class EBPolicyUNet(PolicyAlgo):
         Returns:
             loss_log (dict): name -> summary statistic
         """
-        log = super(EBPolicyUNet, self).log_info(info)
+        log = super(DiffusionPolicyTransformer, self).log_info(info)
         log["Loss"] = info["losses"]["l2_loss"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
@@ -322,10 +283,7 @@ class EBPolicyUNet(PolicyAlgo):
         Returns:
             action (torch.Tensor): action tensor [1, Da]
         """
-
         # obs_dict: key: [1,D]
-        To = self.algo_config.horizon.observation_horizon
-        Ta = self.algo_config.horizon.action_horizon
 
         if len(self.action_queue) == 0:
             # no actions left, run inference
@@ -343,6 +301,7 @@ class EBPolicyUNet(PolicyAlgo):
         action = action.unsqueeze(0)
         return action
 
+    @torch.inference_mode()
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
         assert not self.nets.training
         To = self.algo_config.horizon.observation_horizon
@@ -377,13 +336,10 @@ class EBPolicyUNet(PolicyAlgo):
         assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]
 
-        # reshape observation to (B,obs_horizon*obs_dim)
-        obs_cond = obs_features.flatten(start_dim=1)
-
+        obs_cond = self.nets["policy"]["obs_temporal_encoder"](obs_features)
         # initialize action from Guassian noise
-        noisy_action = torch.randn(
+        action = torch.randn(
             (B, Tp, action_dim), device=self.device)
-        naction = noisy_action
 
         # init scheduler
         self.noise_scheduler.set_timesteps(num_inference_timesteps)
@@ -391,22 +347,22 @@ class EBPolicyUNet(PolicyAlgo):
         for k in self.noise_scheduler.timesteps:
             # predict noise
             noise_pred = nets["policy"]["noise_pred_net"](
-                sample=naction,
+                sample=action,
                 timestep=k,
-                global_cond=obs_cond
+                cond=obs_cond
             )
 
             # inverse diffusion step (remove noise)
-            naction = self.noise_scheduler.step(
+            action = self.noise_scheduler.step(
                 model_output=noise_pred,
                 timestep=k,
-                sample=naction
+                sample=action
             ).prev_sample
 
-        # process action using Ta
         start = To - 1
         end = start + Ta
-        action = naction[:,start:end]
+        action = action[:, start:end]    # slice the window to execute now
+
         return action
 
     def serialize(self):

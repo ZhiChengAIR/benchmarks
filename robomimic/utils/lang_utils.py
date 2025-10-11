@@ -11,10 +11,11 @@ tz = AutoTokenizer.from_pretrained(tokenizer, TOKENIZERS_PARALLELISM=True)
 
 LANG_EMB_OBS_KEY = "lang_emb"
 
+
 def get_lang_emb(lang):
     if lang is None:
         return None
-    
+
     tokens = tz(
         text=lang,                   # the sentence to be encoded
         add_special_tokens=True,             # Add [CLS] and [SEP]
@@ -26,6 +27,7 @@ def get_lang_emb(lang):
     lang_emb = lang_emb_model(**tokens)['text_embeds'].detach()[0]
 
     return lang_emb
+
 
 def get_lang_emb_shape():
     return list(get_lang_emb('dummy').shape)
