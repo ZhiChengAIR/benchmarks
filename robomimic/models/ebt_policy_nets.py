@@ -1,11 +1,16 @@
 """ This file contains nets used for Diffusion Policy. """
 import math
-from typing import Union
+from typing import Union, Optional
 
 import torch
 import torch.nn as nn
 
+import robomimic.models.base_nets as BaseNets
+
 from robomimic.models.transformers import SpatioTemporalEncoder, DiT
+from robomimic.models.sincos_pos_emb import (
+    get_1d_sincos_pos_embed_from_grid
+)
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -63,6 +68,7 @@ class ObsTemporalEncoder(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        mask: Optional[torch.Tensor] = None
     ):
         """
         x: (B,T,input_dim)
@@ -70,8 +76,7 @@ class ObsTemporalEncoder(nn.Module):
         global_cond: (B,global_cond_dim)
         output: (B,T,input_dim)
         """
-        x = self.input_emb(x) + self.input_pos_emb
-        x = self.encoder(x, self.mask)
+        x = self.encoder(x, mask)
 
         return x
 
@@ -103,10 +108,21 @@ class EBTTransformer(nn.Module):
 
         super().__init__()
         # input embedding stem
-        self.input_emb = nn.Linear(input_dim, embed_dim)
-        self.input_pos_emb = nn.Parameter(torch.zeros(1, horizon, embed_dim))
+        self.pos_emb = nn.Parameter(
+            torch.zeros(1, horizon, embed_dim),
+            requires_grad=False
+        )
         self.time_emb = SinusoidalPosEmb(embed_dim)
-
+        def approx_gelu(): return nn.GELU(approximate="tanh")
+        self.input_emb = BaseNets.MLP(
+            input_dim=input_dim,
+            output_dim=embed_dim,
+            layer_dims=(embed_dim,),
+            activation=approx_gelu,
+            dropouts=(proj_dropout,),
+            normalization=True,
+            output_activation=approx_gelu
+        )
         self.decoder = DiT(
             dim=embed_dim,
             depth=num_layers,
@@ -115,20 +131,20 @@ class EBTTransformer(nn.Module):
             attn_drop=attn_dropout,
             proj_drop=proj_dropout
         )
-        mask = torch.tril(torch.ones(horizon, n_obs_steps)).view(
-            1, 1, horizon, n_obs_steps
-        )
-        self.register_buffer("mask", mask)
+        self.dim = embed_dim
 
         print("number of parameters: {:e}".format(
             sum(p.numel() for p in self.parameters()))
         )
+        self._init_pos_emb(self.pos_emb, horizon)
 
     def forward(
         self,
         sample: torch.Tensor,
         timestep: Union[torch.Tensor, float, int],
-        cond: torch.Tensor
+        cond: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        memory_mask: Optional[torch.Tensor] = None
     ):
         """
         x: (B,T,input_dim)
@@ -147,10 +163,29 @@ class EBTTransformer(nn.Module):
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timesteps = timesteps.expand(sample.shape[0])
 
-        x = self.input_emb(sample) + self.input_pos_emb
+        x = self.input_emb(sample) + self.pos_emb
         t = self.time_emb(timesteps)[:, None]
         c = cond
-        x = self.decoder(x=x, c=c, t=t, mask=None, memory_mask=self.mask)
+        x = self.decoder(x=x, c=c, t=t, mask=mask, memory_mask=memory_mask)
 
         # (B,T,C)
         return x
+
+    def _init_pos_emb(
+        self,
+        module: nn.Parameter,
+        timesteps: int,
+    ) -> None:
+        """
+        Initialise all the postional embeddings to be sin-cos positional
+        embeddings.
+
+        Args:
+            module: The positional embedding that will be initialised
+            timesteps: The number of timesteps to consider in the position
+        """
+        pos = torch.arange(timesteps)
+        pos_emb = get_1d_sincos_pos_embed_from_grid(self.dim, pos)
+
+        pos_emb = pos_emb.unsqueeze(0)
+        module.data.copy_(pos_emb)

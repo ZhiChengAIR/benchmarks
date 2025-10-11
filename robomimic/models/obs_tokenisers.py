@@ -2,6 +2,7 @@
 Contains torch Modules for observation tokenisers
 such as encoders (e.g. LowDimTokeniser, VisionTokeniser, ...)
 """
+import math
 import textwrap
 from typing import Dict, Any, Sequence
 from collections import OrderedDict
@@ -11,11 +12,16 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torchvision.transforms import Lambda, Compose
+from einops import rearrange
 
 import robomimic.models.base_nets as BaseNets
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.lang_utils as LangUtils
 from robomimic.utils.python_utils import extract_class_init_kwargs_from_dict
+from robomimic.models.sincos_pos_emb import (
+    get_3d_sincos_pos_embed,
+    get_1d_sincos_pos_embed_from_grid
+)
 
 # NOTE: this is required for the backbone classes to be found by the `eval` call in the core networks
 from robomimic.models.base_nets import (
@@ -33,9 +39,11 @@ from robomimic.models.obs_core import (
     VisualCoreLanguageConditioned
 )
 
+
 def obs_tokeniser_factory(
     obs_shapes,
     output_dim,
+    n_obs_steps,
     feature_activation=nn.ReLU,
     encoder_kwargs=None
 ):
@@ -68,7 +76,8 @@ def obs_tokeniser_factory(
     """
     enc = ObservationTokeniser(
         feature_activation=feature_activation,
-        output_dim=output_dim
+        output_dim=output_dim,
+        n_obs_steps=n_obs_steps
     )
     for k, obs_shape in obs_shapes.items():
         obs_modality = ObsUtils.OBS_KEYS_TO_MODALITIES[k]
@@ -161,8 +170,9 @@ class ObservationGroupTokeniser(BaseNets.Module):
         self,
         observation_group_shapes: Dict[str, Any],
         output_dim: int,
+        n_obs_steps: int,
         feature_activation=nn.ReLU,
-        encoder_kwargs=None,
+        encoder_kwargs=None
     ):
         """
         Args:
@@ -206,7 +216,8 @@ class ObservationGroupTokeniser(BaseNets.Module):
                 obs_shapes=self.observation_group_shapes[obs_group],
                 feature_activation=feature_activation,
                 encoder_kwargs=encoder_kwargs,
-                output_dim=output_dim
+                output_dim=output_dim,
+                n_obs_steps=n_obs_steps
             )
 
     def forward(self, **inputs):
@@ -273,6 +284,7 @@ class ObservationTokeniser(BaseNets.Module):
     def __init__(
         self,
         output_dim: int,
+        n_obs_steps: int,
         feature_activation: nn.Module = nn.ReLU,
     ):
         """
@@ -291,6 +303,7 @@ class ObservationTokeniser(BaseNets.Module):
         self._locked = False
         self.lowdim_shape_dict = OrderedDict()
         self.output_dim = output_dim
+        self.n_obs_steps = n_obs_steps
 
     def register_obs_key(
         self,
@@ -373,7 +386,9 @@ class ObservationTokeniser(BaseNets.Module):
             if self.obs_nets_classes[k] is not None:
                 # create net to process this modality
                 self.obs_nets[k] = ObsUtils.OBS_ENCODER_CORES[self.obs_nets_classes[k]](
-                    **self.obs_nets_kwargs[k], feature_dimension=self.output_dim
+                    **self.obs_nets_kwargs[k],
+                    feature_dimension=self.output_dim,
+                    n_obs_steps=self.n_obs_steps
                 )
             elif self.obs_share_mods[k] is not None:
                 # make sure net is shared with another modality
@@ -382,6 +397,7 @@ class ObservationTokeniser(BaseNets.Module):
         self.lowdim_tokeniser = LowDimTokeniser(
             lowdim_shape_dict=self.lowdim_shape_dict,
             output_dim=self.output_dim,
+            n_obs_steps=self.n_obs_steps
         )
 
         self.activation = None
@@ -472,10 +488,13 @@ class ObservationTokeniser(BaseNets.Module):
                 feats.append(x)
 
         lowdim_feats = self.lowdim_tokeniser(lowdim_dict)
-        feats = [lowdim_feats[:, None]] + feats
+        feats = [lowdim_feats] + feats
 
         # concatenate all features together
-        return torch.cat(feats, dim=1)
+        feats = torch.cat(feats, dim=-2)
+        feats = rearrange(feats, "b t n d -> b (t n) d")
+
+        return feats
 
 
 class LowDimTokeniser(EncoderCore):
@@ -487,6 +506,7 @@ class LowDimTokeniser(EncoderCore):
         self,
         lowdim_shape_dict: Dict,
         output_dim: int,
+        n_obs_steps: int,
         dropout: float = 0.0
     ):
         input_shape = [sum(
@@ -494,7 +514,6 @@ class LowDimTokeniser(EncoderCore):
         )]
         super(LowDimTokeniser, self).__init__(input_shape=input_shape)
         self.input_dict = lowdim_shape_dict
-        print(self.input_dict)
         self.input_shape = input_shape
         def approx_gelu(): return nn.GELU(approximate="tanh")
         self.lowdim_encoder = BaseNets.MLP(
@@ -506,6 +525,13 @@ class LowDimTokeniser(EncoderCore):
             normalization=True,
             output_activation=approx_gelu
         )
+        self.pos_emb = nn.Parameter(
+            torch.zeros(1, n_obs_steps, output_dim),
+            requires_grad=False
+        )
+        self.n_obs_steps = n_obs_steps
+        self.dim = output_dim
+        self._init_weights()
 
     def forward(
         self,
@@ -514,8 +540,43 @@ class LowDimTokeniser(EncoderCore):
         lowdim_keys = sorted(lowdim_dict.keys())
         lowdim = torch.cat([lowdim_dict[key] for key in lowdim_keys], dim=-1)
         lowdim_emb = self.lowdim_encoder(lowdim)
+        lowdim_emb = lowdim_emb + self.pos_emb
 
-        return lowdim_emb
+        return lowdim_emb.unsqueeze(-2)
+
+    def _init_weights(self) -> None:
+        """
+        Initialises all the ffn weights in the DiT encoder and separation
+        special token with xavier uniform/normal distribution, and the
+        positional embeddings to sin-cos
+        """
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+        self.apply(_basic_init)
+
+        self._init_pos_emb(self.pos_emb, self.n_obs_steps)
+
+    def _init_pos_emb(
+        self,
+        module: nn.Parameter,
+        timesteps: int,
+    ) -> None:
+        """
+        Initialise all the postional embeddings to be sin-cos positional
+        embeddings.
+
+        Args:
+            module: The positional embedding that will be initialised
+            timesteps: The number of timesteps to consider in the position
+        """
+        pos = torch.arange(timesteps)
+        pos_emb = get_1d_sincos_pos_embed_from_grid(self.dim, pos)
+
+        pos_emb = pos_emb.unsqueeze(0)
+        module.data.copy_(pos_emb)
 
     def output_shape(self, input_shape: int = None):
         return self.lowdim_encoder.output_shape()
@@ -541,11 +602,12 @@ class VisionTokeniser(VisualCore):
     def __init__(
         self,
         input_shape: Sequence[int],
+        n_obs_steps: int,
         dropout: float = 0.0,
         backbone_class: str = "ResNet18Conv",
         backbone_kwargs: Dict[str, Any] = None,
         patchify: bool = True,
-        feature_dimension: int = 64,
+        feature_dimension: int = 64
     ):
         """
         Args:
@@ -584,16 +646,14 @@ class VisionTokeniser(VisualCore):
             net_list.append(self.patchify_module)
 
         # get input dim after tokenisation
-        self.feature_dimension = feature_dimension
+        self.dim = feature_dimension
         token_shape = self.backbone.output_shape(input_shape)
         if self.patchify:
             token_shape = self.patchify_module.output_shape(token_shape)
         input_dim = token_shape[-1]
+        n_rgb_tokens = token_shape[-2]
 
         def approx_gelu(): return nn.GELU(approximate="tanh")
-        print("input_dim:", input_dim)
-        print()
-        print()
         self.projector = BaseNets.MLP(
             input_dim=input_dim,
             output_dim=feature_dimension,
@@ -607,6 +667,13 @@ class VisionTokeniser(VisualCore):
         net_list.append(self.projector)
 
         self.nets = nn.Sequential(*net_list)
+        self.pos_emb = nn.Parameter(
+            torch.zeros(1, n_obs_steps, n_rgb_tokens, feature_dimension),
+            requires_grad=False
+        )
+        self.n_rgb_tokens = n_rgb_tokens
+        self.n_obs_steps = n_obs_steps
+        self._init_weights()
 
     def output_shape(self, input_shape):
         """
@@ -623,16 +690,57 @@ class VisionTokeniser(VisualCore):
         feat_shape = self.backbone.output_shape(input_shape)
         if self.patchify:
             feat_shape = self.patchify_module.output_shape(feat_shape)
-        feat_shape[-1] = self.feature_dimension
+        feat_shape[-1] = self.dim
         return feat_shape
 
-    def forward(self, inputs):
+    def forward(self, x):
         """
         Forward pass through visual core.
         """
         ndim = len(self.input_shape)
-        assert tuple(inputs.shape)[-ndim:] == tuple(self.input_shape)
-        return super(VisionTokeniser, self).forward(inputs)
+        B, T, C, H, W = x.shape
+        x = rearrange(x, "b t c h w -> (b t) c h w")
+        assert tuple(x.shape)[-ndim:] == tuple(self.input_shape)
+        x = super(VisionTokeniser, self).forward(x)
+        x = rearrange(x, "(b t) n d -> b t n d", b=B, t=T)
+        x = x + self.pos_emb
+
+        return x
+
+    def _init_weights(self) -> None:
+        """
+        Initialises all the ffn weights in the DiT encoder and separation
+        special token with xavier uniform/normal distribution, and the
+        positional embeddings to sin-cos
+        """
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
+        self.apply(_basic_init)
+        self._init_pos_emb(self.pos_emb, self.n_obs_steps)
+
+    def _init_pos_emb(
+        self,
+        module: nn.Parameter,
+        timesteps: int,
+    ) -> None:
+        """
+        Initialise all the postional embeddings to be sin-cos positional
+        embeddings.
+
+        Args:
+            module: The positional embedding that will be initialised
+            timesteps: The number of timesteps to consider in the position
+        """
+        spatial = int(math.sqrt(self.n_rgb_tokens))
+        pos_emb = get_3d_sincos_pos_embed(self.dim, spatial, timesteps)
+
+        pos_emb = pos_emb.unsqueeze(0)
+        module.data.copy_(pos_emb)
+
 
     def __repr__(self):
         """Pretty print network."""

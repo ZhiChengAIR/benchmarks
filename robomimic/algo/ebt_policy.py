@@ -17,7 +17,9 @@ import robomimic.models.ebt_policy_nets as EBTNets
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
+import robomimic.utils.token_utils as TokUtils
 
+from robomimic.models.transformers import SpatioTemporalEncoder
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
 
@@ -45,23 +47,25 @@ class EBTPolicy(PolicyAlgo):
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         encoder_kwargs = ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder)
-        obs_encoder = ObsTok.ObservationGroupTokeniser(
+        obs_tokeniser = ObsTok.ObservationGroupTokeniser(
             observation_group_shapes=observation_group_shapes,
             encoder_kwargs=encoder_kwargs,
-            output_dim=self.algo_config.transformer.embed_dim
+            output_dim=self.algo_config.transformer.embed_dim,
+            n_obs_steps=self.algo_config.horizon.observation_horizon
         )
         # IMPORTANT!
         # replace all BatchNorm with GroupNorm to work with EMA
         # performance will tank if you forget to do this!
-        obs_encoder = replace_bn_with_gn(obs_encoder)
+        obs_tokeniser = replace_bn_with_gn(obs_tokeniser)
 
-        obs_temporal_encoder = EBTNets.ObsTemporalEncoder(
-            embed_dim=self.algo_config.transformer.embed_dim,
-            num_layers=self.algo_config.transformer.num_layers,
-            num_heads=self.algo_config.transformer.num_heads,
+        obs_temporal_encoder = SpatioTemporalEncoder(
+            dim=self.algo_config.transformer.embed_dim,
+            depth=self.algo_config.transformer.num_layers,
+            heads=self.algo_config.transformer.num_heads,
+            output_dim=self.algo_config.transformer.embed_dim,
             n_obs_steps=self.algo_config.horizon.observation_horizon,
-            attn_dropout=self.algo_config.transformer.attn_dropout,
-            proj_dropout=self.algo_config.transformer.proj_dropout
+            attn_drop=self.algo_config.transformer.attn_dropout,
+            proj_drop=self.algo_config.transformer.proj_dropout
         )
         # create network object
         noise_pred_net = EBTNets.EBTTransformer(
@@ -80,7 +84,7 @@ class EBTPolicy(PolicyAlgo):
         # the final arch has 2 parts
         nets = nn.ModuleDict({
             "policy": nn.ModuleDict({
-                "obs_encoder": obs_encoder,
+                "obs_tokeniser": obs_tokeniser,
                 "obs_temporal_encoder": obs_temporal_encoder,
                 "noise_pred_net": noise_pred_net
             })
@@ -136,7 +140,6 @@ class EBTPolicy(PolicyAlgo):
                 will be used for training
         """
         To = self.algo_config.horizon.observation_horizon
-        Ta = self.algo_config.horizon.action_horizon
         Tp = self.algo_config.horizon.prediction_horizon
 
         input_batch = dict()
@@ -173,7 +176,7 @@ class EBTPolicy(PolicyAlgo):
                 that might be relevant for logging
         """
         B = batch["actions"].shape[0]
-
+        To = self.algo_config.horizon.observation_horizon
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(EBTPolicy, self).train_on_batch(batch, epoch, validate=validate)
@@ -188,11 +191,11 @@ class EBTPolicy(PolicyAlgo):
                 # first two dimensions should be [B, T] for inputs
                 assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
 
-            obs_features = TensorUtils.time_distributed(inputs, self.nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
-            obs_features = rearrange(obs_features, "b t n d -> b (t n) d")
+            obs_features = self.nets["policy"]["obs_tokeniser"](**inputs)
             assert obs_features.ndim == 3  # [B, T, D]
             obs_cond = self.nets["policy"]["obs_temporal_encoder"](
-                obs_features
+                obs_features,
+                mask=None
             )
 
             # sample noise to add to actions
@@ -209,9 +212,21 @@ class EBTPolicy(PolicyAlgo):
             noisy_actions = self.noise_scheduler.add_noise(
                 actions, noise, timesteps)
 
+            memory_mask = TokUtils.generate_attention_mask(
+                obs_tokens=obs_cond,
+                n_obs_steps=To,
+                action_tokens=noisy_actions,
+                cross_attention=True
+            )
+
             # predict the noise residual
             noise_pred = self.nets["policy"]["noise_pred_net"](
-                noisy_actions, timesteps, obs_cond)
+                noisy_actions,
+                timesteps,
+                obs_cond,
+                mask=None,
+                memory_mask=memory_mask
+            )
 
             # L2 loss
             loss = F.mse_loss(noise_pred, noise)
@@ -330,24 +345,37 @@ class EBTPolicy(PolicyAlgo):
                 # frame stacking is not invoked when sequence length is 1
                 inputs["obs"][k] = inputs["obs"][k].unsqueeze(1)
             assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
-        obs_features = TensorUtils.time_distributed(inputs, nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
+
+        obs_features = self.nets["policy"]["obs_tokeniser"](**inputs)
         assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]
+        obs_cond = self.nets["policy"]["obs_temporal_encoder"](
+            obs_features,
+            mask=None
+        )
 
-        obs_cond = self.nets["policy"]["obs_temporal_encoder"](obs_features)
         # initialize action from Guassian noise
         action = torch.randn(
             (B, Tp, action_dim), device=self.device)
+
+        memory_mask = TokUtils.generate_attention_mask(
+            obs_tokens=obs_cond,
+            n_obs_steps=To,
+            action_tokens=action,
+            cross_attention=True
+        )
 
         # init scheduler
         self.noise_scheduler.set_timesteps(num_inference_timesteps)
 
         for k in self.noise_scheduler.timesteps:
             # predict noise
-            noise_pred = nets["policy"]["noise_pred_net"](
+            noise_pred = self.nets["policy"]["noise_pred_net"](
                 sample=action,
                 timestep=k,
-                cond=obs_cond
+                cond=obs_cond,
+                mask=None,
+                memory_mask=memory_mask
             )
 
             # inverse diffusion step (remove noise)
