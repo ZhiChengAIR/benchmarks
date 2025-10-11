@@ -201,6 +201,17 @@ class Squeeze(Module):
         return x.squeeze(dim=self.dim)
 
 
+class Transpose(Module):
+
+    def __init__(self, dim1: int, dim2: int):
+        super(Transpose, self).__init__()
+        self.dim1 = dim1
+        self.dim2 = dim2
+
+    def forward(self, x):
+        return x.transpose(self.dim1, self.dim2)
+
+
 class MLP(Module):
     """
     Base class for simple Multi-Layer Perceptrons.
