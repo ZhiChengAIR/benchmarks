@@ -61,21 +61,12 @@ class EBTPolicyConfig(BaseConfig):
         self.algo.ema.enabled = True
         self.algo.ema.power = 0.75
 
-        # Noise Scheduler
-        ## DDPM
-        self.algo.ddpm.enabled = True
-        self.algo.ddpm.num_train_timesteps = 100
-        self.algo.ddpm.num_inference_timesteps = 100
-        self.algo.ddpm.beta_schedule = 'squaredcos_cap_v2'
-        self.algo.ddpm.clip_sample = True
-        self.algo.ddpm.prediction_type = 'epsilon'
-
-        ## DDIM
-        self.algo.ddim.enabled = False
-        self.algo.ddim.num_train_timesteps = 100
-        self.algo.ddim.num_inference_timesteps = 10
-        self.algo.ddim.beta_schedule = 'squaredcos_cap_v2'
-        self.algo.ddim.clip_sample = True
-        self.algo.ddim.set_alpha_to_one = True
-        self.algo.ddim.steps_offset = 0
-        self.algo.ddim.prediction_type = 'epsilon'
+        self.algo.ebt.randomize_mcmc_step_size_scale = 1
+        self.algo.ebt.randomize_mcmc_num_steps = 3
+        self.algo.ebt.mcmc_num_steps = 3
+        self.algo.ebt.mcmc_step_size = 10000
+        self.algo.ebt.clamp_future_grads = False
+        self.algo.ebt.clamp_futures_grad_max_change = 9.0
+        self.algo.ebt.mcmc_step_size_learnable = False
+        self.algo.ebt.langevin_dynamics_noise_std = 0.05
+        self.algo.ebt.truncate_mcmc = False

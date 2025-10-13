@@ -1,19 +1,21 @@
 """
 Implementation of EBT Policy https://diffusion-policy.cs.columbia.edu/ by Cheng Chi
 """
-from typing import Callable, Union
+from typing import Callable, Union, Sequence
+import random
 from collections import OrderedDict, deque
 from packaging.version import parse as parse_version
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel
 
 import robomimic.models.obs_tokenisers as ObsTok
+import robomimic.models.obs_nets as ObsNets
+from robomimic.models.base_nets import RMSNorm
 import robomimic.models.ebt_policy_nets as EBTNets
+import robomimic.models.diffusion_policy_nets as DPNets
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
@@ -47,28 +49,28 @@ class EBTPolicy(PolicyAlgo):
         observation_group_shapes = OrderedDict()
         observation_group_shapes["obs"] = OrderedDict(self.obs_shapes)
         encoder_kwargs = ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder)
-        obs_tokeniser = ObsTok.ObservationGroupTokeniser(
+        obs_encoder = ObsNets.ObservationGroupEncoder(
             observation_group_shapes=observation_group_shapes,
             encoder_kwargs=encoder_kwargs,
-            output_dim=self.algo_config.transformer.embed_dim,
-            n_obs_steps=self.algo_config.horizon.observation_horizon
         )
+
+        obs_dim = obs_encoder.output_shape()[0]
         # IMPORTANT!
         # replace all BatchNorm with GroupNorm to work with EMA
         # performance will tank if you forget to do this!
-        obs_tokeniser = replace_bn_with_gn(obs_tokeniser)
-
-        obs_temporal_encoder = SpatioTemporalEncoder(
-            dim=self.algo_config.transformer.embed_dim,
-            depth=self.algo_config.transformer.num_layers,
-            heads=self.algo_config.transformer.num_heads,
-            output_dim=self.algo_config.transformer.embed_dim,
+        obs_encoder = replace_bn_with_gn(obs_encoder)
+        obs_temporal_encoder = DPNets.ObsTemporalEncoder(
+            input_dim=obs_dim,
+            embed_dim=self.algo_config.transformer.embed_dim,
+            num_layers=self.algo_config.transformer.num_layers,
+            num_heads=self.algo_config.transformer.num_heads,
             n_obs_steps=self.algo_config.horizon.observation_horizon,
-            attn_drop=self.algo_config.transformer.attn_dropout,
-            proj_drop=self.algo_config.transformer.proj_dropout
+            attn_dropout=self.algo_config.transformer.attn_dropout,
+            proj_dropout=self.algo_config.transformer.proj_dropout
         )
+
         # create network object
-        noise_pred_net = EBTNets.EBTTransformer(
+        energy_pred_net = EBTNets.EBTTransformer(
             input_dim=self.ac_dim,
             cond_dim=self.algo_config.transformer.embed_dim,
             embed_dim=self.algo_config.transformer.embed_dim,
@@ -84,34 +86,13 @@ class EBTPolicy(PolicyAlgo):
         # the final arch has 2 parts
         nets = nn.ModuleDict({
             "policy": nn.ModuleDict({
-                "obs_tokeniser": obs_tokeniser,
+                "obs_encoder": obs_encoder,
                 "obs_temporal_encoder": obs_temporal_encoder,
-                "noise_pred_net": noise_pred_net
+                "energy_pred_net": energy_pred_net
             })
         })
 
         nets = nets.float().to(self.device)
-
-        # setup noise scheduler
-        noise_scheduler = None
-        if self.algo_config.ddpm.enabled:
-            noise_scheduler = DDPMScheduler(
-                num_train_timesteps=self.algo_config.ddpm.num_train_timesteps,
-                beta_schedule=self.algo_config.ddpm.beta_schedule,
-                clip_sample=self.algo_config.ddpm.clip_sample,
-                prediction_type=self.algo_config.ddpm.prediction_type
-            )
-        elif self.algo_config.ddim.enabled:
-            noise_scheduler = DDIMScheduler(
-                num_train_timesteps=self.algo_config.ddim.num_train_timesteps,
-                beta_schedule=self.algo_config.ddim.beta_schedule,
-                clip_sample=self.algo_config.ddim.clip_sample,
-                set_alpha_to_one=self.algo_config.ddim.set_alpha_to_one,
-                steps_offset=self.algo_config.ddim.steps_offset,
-                prediction_type=self.algo_config.ddim.prediction_type
-            )
-        else:
-            raise RuntimeError()
 
         # setup EMA
         ema = None
@@ -120,11 +101,24 @@ class EBTPolicy(PolicyAlgo):
 
         # set attrs
         self.nets = nets
-        self.noise_scheduler = noise_scheduler
         self.ema = ema
         self.action_check_done = False
         self.obs_queue = None
         self.action_queue = None
+        self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
+        self.randomize_mcmc_num_steps = self.algo_config.ebt.randomize_mcmc_num_steps
+        self.mcmc_step_size = self.algo_config.ebt.mcmc_step_size
+        self.alpha = nn.Parameter(
+            torch.tensor(
+                float(self.mcmc_step_size)),
+            requires_grad=self.algo_config.ebt.mcmc_step_size_learnable
+        )
+        self.clamp_futures_grad = self.algo_config.ebt.clamp_future_grads
+        self.clamp_futures_grad_max_change = self.algo_config.ebt.clamp_futures_grad_max_change
+        self.mcmc_num_steps = self.algo_config.ebt.mcmc_num_steps
+        self.truncate_mcmc = self.algo_config.ebt.truncate_mcmc
+        self.langevin_dynamics_noise_std = torch.tensor(self.algo_config.ebt.langevin_dynamics_noise_std)
+        self.ebl_norm = RMSNorm(self.ac_dim)
 
     def process_batch_for_training(self, batch):
         """
@@ -175,12 +169,11 @@ class EBTPolicy(PolicyAlgo):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
-        B = batch["actions"].shape[0]
         To = self.algo_config.horizon.observation_horizon
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(EBTPolicy, self).train_on_batch(batch, epoch, validate=validate)
-            actions = batch["actions"]
+            action = batch["actions"]
 
             # encode obs
             inputs = {
@@ -191,51 +184,87 @@ class EBTPolicy(PolicyAlgo):
                 # first two dimensions should be [B, T] for inputs
                 assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
 
-            obs_features = self.nets["policy"]["obs_tokeniser"](**inputs)
+            obs_features = TensorUtils.time_distributed(inputs, self.nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
+            B = obs_features.shape[0]
             assert obs_features.ndim == 3  # [B, T, D]
             obs_cond = self.nets["policy"]["obs_temporal_encoder"](
-                obs_features,
-                mask=None
+                obs_features
             )
 
             # sample noise to add to actions
-            noise = torch.randn(actions.shape, device=self.device)
-
-            # sample a diffusion iteration for each data point
-            timesteps = torch.randint(
-                0, self.noise_scheduler.config.num_train_timesteps,
-                (B,), device=self.device
-            ).long()
-
-            # add noise to the clean actions according to the noise magnitude at each diffusion iteration
-            # (this is the forward diffusion process)
-            noisy_actions = self.noise_scheduler.add_noise(
-                actions, noise, timesteps)
+            pred_action = torch.randn(action.shape, device=self.device)
 
             memory_mask = TokUtils.generate_attention_mask(
                 obs_tokens=obs_cond,
                 n_obs_steps=To,
-                action_tokens=noisy_actions,
+                action_tokens=action,
                 cross_attention=True
             )
 
-            # predict the noise residual
-            noise_pred = self.nets["policy"]["noise_pred_net"](
-                noisy_actions,
-                timesteps,
-                obs_cond,
-                mask=None,
-                memory_mask=memory_mask
+            predicted_traj_list = []
+            predicted_energies_list = []
+            langevin_dynamics_noise_std = torch.clamp(
+                self.langevin_dynamics_noise_std, min=0.000001
+            )
+            alpha = self._compute_alpha(
+                no_randomness=False,
+                batch_size=B
+            )
+            num_mcmc_steps = self._compute_num_mcmc_steps(
+                no_randomness=False
             )
 
-            # L2 loss
-            loss = F.mse_loss(noise_pred, noise)
+            def energy_step(
+                trajectory: torch.Tensor,
+                cond_tokens: torch.Tensor,
+                i: int
+            ):
+                trajectory = trajectory.detach().requires_grad_()
 
-            # logging
-            losses = {
-                "l2_loss": loss
-            }
-            info["losses"] = TensorUtils.detach(losses)
+                if self.langevin_dynamics_noise_std != 0:
+                    ld_noise = torch.randn_like(
+                        trajectory,
+                        device=trajectory.device,
+                    ) * langevin_dynamics_noise_std
+                    trajectory = trajectory + ld_noise
+
+                energy_pred = self.nets["policy"]["energy_pred_net"](
+                    sample=trajectory,
+                    cond=cond_tokens,
+                    memory_mask=memory_mask
+                )
+
+                energy_preds = self.ebl_norm(energy_pred)
+
+                energy_pred = energy_preds.mean(dim=(-1, -2))
+                predicted_energies_list.append(energy_pred)
+
+                predicted_traj_grad = self._compute_grad(
+                    energy_pred=energy_pred,
+                    trajectory=trajectory,
+                    step_no=i,
+                    num_mcmc_steps=num_mcmc_steps,
+                    create_graph=True
+                )
+
+                trajectory = trajectory - alpha * predicted_traj_grad
+
+                predicted_traj_list.append(trajectory)
+
+                return trajectory
+
+            # Set to true for validation since grad would be off.
+            with torch.set_grad_enabled(True):
+                for i in range(num_mcmc_steps):
+                    pred_action = energy_step(pred_action, obs_cond, i)
+
+            loss_info, loss = compute_loss(
+                action,
+                predicted_traj_list,
+                predicted_energies_list,
+                self.truncate_mcmc
+            )
+            info["losses"] = loss_info
 
             if not validate:
                 # gradient step
@@ -314,19 +343,12 @@ class EBTPolicy(PolicyAlgo):
         action = action.unsqueeze(0)
         return action
 
-    @torch.inference_mode()
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
         assert not self.nets.training
         To = self.algo_config.horizon.observation_horizon
         Ta = self.algo_config.horizon.action_horizon
         Tp = self.algo_config.horizon.prediction_horizon
         action_dim = self.ac_dim
-        if self.algo_config.ddpm.enabled is True:
-            num_inference_timesteps = self.algo_config.ddpm.num_inference_timesteps
-        elif self.algo_config.ddim.enabled is True:
-            num_inference_timesteps = self.algo_config.ddim.num_inference_timesteps
-        else:
-            raise ValueError
 
         # select network
         nets = self.nets
@@ -346,50 +368,133 @@ class EBTPolicy(PolicyAlgo):
                 inputs["obs"][k] = inputs["obs"][k].unsqueeze(1)
             assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
 
-        obs_features = self.nets["policy"]["obs_tokeniser"](**inputs)
+        obs_features = TensorUtils.time_distributed(inputs, nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
         assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]
-        obs_cond = self.nets["policy"]["obs_temporal_encoder"](
+        obs_cond = nets["policy"]["obs_temporal_encoder"](
             obs_features,
-            mask=None
         )
 
         # initialize action from Guassian noise
-        action = torch.randn(
+        action_pred = torch.randn(
             (B, Tp, action_dim), device=self.device)
 
         memory_mask = TokUtils.generate_attention_mask(
             obs_tokens=obs_cond,
             n_obs_steps=To,
-            action_tokens=action,
+            action_tokens=action_pred,
             cross_attention=True
         )
+        alpha = self._compute_alpha(
+            no_randomness=True,
+            batch_size=B,
+        )
+        num_mcmc_steps = self._compute_num_mcmc_steps(
+            no_randomness=True
+        )
 
-        # init scheduler
-        self.noise_scheduler.set_timesteps(num_inference_timesteps)
-
-        for k in self.noise_scheduler.timesteps:
-            # predict noise
-            noise_pred = self.nets["policy"]["noise_pred_net"](
-                sample=action,
-                timestep=k,
-                cond=obs_cond,
-                mask=None,
+        def energy_step(
+            trajectory: torch.Tensor,
+            cond_tokens: torch.Tensor,
+            i: int
+        ):
+            trajectory = trajectory.detach().requires_grad_()
+            energy_pred = self.nets["policy"]["energy_pred_net"](
+                sample=trajectory,
+                cond=cond_tokens,
                 memory_mask=memory_mask
             )
 
-            # inverse diffusion step (remove noise)
-            action = self.noise_scheduler.step(
-                model_output=noise_pred,
-                timestep=k,
-                sample=action
-            ).prev_sample
+            energy_pred = self.ebl_norm(energy_pred)
+
+            energy_pred = energy_pred.mean(dim=(-1, -2))
+
+            predicted_traj_grad = self._compute_grad(
+                energy_pred=energy_pred,
+                trajectory=trajectory,
+                step_no=i,
+                num_mcmc_steps=num_mcmc_steps,
+                create_graph=False
+            )
+
+            trajectory = trajectory - alpha * predicted_traj_grad
+
+            return trajectory
+
+        # Set to true for validation since grad would be off.
+        with torch.set_grad_enabled(True):
+            for i in range(num_mcmc_steps):
+                action_pred = energy_step(action_pred, obs_cond, i)
 
         start = To - 1
         end = start + Ta
-        action = action[:, start:end]    # slice the window to execute now
+        action_pred = action_pred[:, start:end]    # slice the window to execute now
 
-        return action
+        return action_pred
+
+    def _compute_alpha(
+        self,
+        no_randomness: bool,
+        batch_size: int
+    ) -> float:
+        alpha = torch.clamp(self.alpha, min=0.0001)
+        if not no_randomness and self.randomize_mcmc_step_size_scale != 1:
+            expanded_alpha = alpha.expand(batch_size, 1, 1, 1)
+
+            scale = self.randomize_mcmc_step_size_scale
+            low = alpha / scale
+            high = alpha * scale
+            alpha = low + torch.rand_like(expanded_alpha) * (high - low)
+
+        return alpha
+
+    def _compute_num_mcmc_steps(self, no_randomness: bool) -> int:
+        if no_randomness or self.randomize_mcmc_num_steps <= 0:
+            return self.mcmc_num_steps
+
+        random_steps = random.randint(0, self.randomize_mcmc_num_steps + 1)
+        return (self.mcmc_num_steps) + random_steps
+
+    def _compute_grad(
+        self,
+        energy_pred: torch.Tensor,
+        trajectory: torch.Tensor,
+        step_no: int,
+        num_mcmc_steps: int,
+        create_graph
+    ):
+        if self.truncate_mcmc and step_no == num_mcmc_steps - 1:
+            predicted_traj_grad = torch.autograd.grad(
+                outputs=energy_pred.sum(),
+                retain_graph=True,
+                inputs=trajectory,
+                create_graph=create_graph
+            )[0]
+        elif self.truncate_mcmc:
+            predicted_traj_grad = torch.autograd.grad(
+                outputs=energy_pred.sum(),
+                inputs=trajectory,
+                create_graph=False
+            )[0]
+        else:
+            predicted_traj_grad = torch.autograd.grad(
+                outputs=energy_pred.sum(),
+                inputs=trajectory,
+                create_graph=create_graph
+            )[0]
+
+        if self.clamp_futures_grad:
+            min_and_max = self.clamp_futures_grad_max_change / (self.alpha)
+            predicted_traj_grad = torch.clamp(
+                predicted_traj_grad,
+                min=-min_and_max,
+                max=min_and_max
+            )
+        if torch.isnan(predicted_traj_grad).any() \
+           or torch.isinf(predicted_traj_grad).any():
+            raise ValueError("NaN or Inf gradients detected during MCMC.")
+
+        return predicted_traj_grad
 
     def serialize(self):
         """
@@ -429,6 +534,54 @@ class EBTPolicy(PolicyAlgo):
             for k in model_dict["lr_schedulers"]:
                 if model_dict["lr_schedulers"][k] is not None:
                     self.lr_schedulers[k].load_state_dict(model_dict["lr_schedulers"][k])
+
+
+def compute_loss(
+    actions: torch.Tensor,
+    predicted_traj_list: Sequence[torch.Tensor],
+    predicted_energies_list: Sequence[torch.Tensor],
+    truncate_mcmc: bool
+):
+    reconstruction_loss = 0
+    total_mcmc_steps = len(predicted_energies_list)
+    for mcmc_step, (predicted_embeddings, predicted_energy) in enumerate(zip(predicted_traj_list, predicted_energies_list)):
+        if truncate_mcmc:
+            if mcmc_step == (total_mcmc_steps - 1):
+                reconstruction_loss = F.mse_loss(
+                    predicted_embeddings, actions
+                )
+                final_reconstruction_loss = reconstruction_loss.detach()
+        else:
+            # loss calculations
+            reconstruction_loss += F.mse_loss(
+                predicted_embeddings,
+                actions
+            )
+            if mcmc_step == (total_mcmc_steps - 1):
+                final_reconstruction_loss = F.mse_loss(
+                    predicted_embeddings,
+                    actions
+                ).detach()
+                reconstruction_loss = reconstruction_loss / total_mcmc_steps
+
+        # pure logging things (no function for training)
+        if mcmc_step == 0:
+            initial_loss = F.mse_loss(predicted_embeddings, actions).detach()
+            initial_pred_energies = predicted_energy.squeeze().mean().detach()
+        if mcmc_step == (total_mcmc_steps - 1):
+            final_pred_energies = predicted_energy.squeeze().mean().detach()
+
+    initial_final_pred_energies_gap = initial_pred_energies - final_pred_energies
+    total_loss = reconstruction_loss
+
+    info = {
+        "init_loss": initial_loss,
+        "final_step_loss": final_reconstruction_loss,
+        "init_final_pred_energies_gap": initial_final_pred_energies_gap,
+        "l2_loss": total_loss
+    }
+
+    return info, total_loss
 
 
 def replace_submodules(
