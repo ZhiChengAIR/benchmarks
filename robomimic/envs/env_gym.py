@@ -21,11 +21,11 @@ class EnvGym(EB.EnvBase):
     """Wrapper class for gym"""
     def __init__(
         self,
-        env_name, 
-        render=False, 
-        render_offscreen=False, 
-        use_image_obs=False, 
-        use_depth_obs=False, 
+        env_name,
+        render=False,
+        render_offscreen=False,
+        use_image_obs=False,
+        use_depth_obs=False,
         **kwargs,
     ):
         """
@@ -85,7 +85,7 @@ class EnvGym(EB.EnvBase):
         Args:
             state (dict): current simulator state that contains:
                 - states (np.ndarray): initial state of the mujoco environment
-        
+
         Returns:
             observation (dict): observation dictionary after setting the simulator state
         """
@@ -105,7 +105,7 @@ class EnvGym(EB.EnvBase):
             height (int): height of image to render - only used if mode is "rgb_array"
             width (int): width of image to render - only used if mode is "rgb_array"
         """
-        if mode =="human":
+        if mode == "human":
             return self.env.render(mode=mode, **kwargs)
         if mode == "rgb_array":
             return self.env.render(mode="rgb_array", height=height, width=width)
@@ -204,16 +204,16 @@ class EnvGym(EB.EnvBase):
 
     @classmethod
     def create_for_data_processing(
-        cls, 
-        env_name, 
-        camera_names, 
-        camera_height, 
-        camera_width, 
-        reward_shaping, 
-        render=None, 
-        render_offscreen=None, 
-        use_image_obs=None, 
-        use_depth_obs=None, 
+        cls,
+        env_name,
+        camera_names,
+        camera_height,
+        camera_width,
+        reward_shaping,
+        render=None,
+        render_offscreen=None,
+        use_image_obs=None,
+        use_depth_obs=None,
         **kwargs,
     ):
         """
