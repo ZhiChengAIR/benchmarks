@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../ebt_policy_trained_models",
+        "output_dir": "../lift_ebt_policy_trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "all",
@@ -128,7 +128,7 @@
                     "robot0_gripper_qpos",
                     "object"
                 ],
-                "rgb": ["sideview_image", "robot0_eye_in_hand_image"],
+                "rgb": ["agentview_image", "robot0_eye_in_hand_image"],
                 "depth": [],
                 "scan": []
             },

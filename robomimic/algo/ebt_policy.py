@@ -235,10 +235,8 @@ class EBTPolicy(PolicyAlgo):
                 )
 
                 energy_preds = self.ebl_norm(energy_pred)
-
                 energy_pred = energy_preds.mean(dim=(-1, -2))
                 predicted_energies_list.append(energy_pred)
-
                 predicted_traj_grad = self._compute_grad(
                     energy_pred=energy_pred,
                     trajectory=trajectory,
@@ -248,7 +246,6 @@ class EBTPolicy(PolicyAlgo):
                 )
 
                 trajectory = trajectory - alpha * predicted_traj_grad
-
                 predicted_traj_list.append(trajectory)
 
                 return trajectory
