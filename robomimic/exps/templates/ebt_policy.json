@@ -2,7 +2,7 @@
     "algo_name": "ebt_policy",
     "experiment": {
         "name": "test",
-        "validate": true,
+        "validate": false,
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
@@ -46,8 +46,8 @@
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
-        "hdf5_filter_key": "train",
-        "hdf5_validation_filter_key": "valid",
+        "hdf5_filter_key": null,
+        "hdf5_validation_filter_key": null,
         "seq_length": 16,
         "pad_seq_length": true,
         "frame_stack": 2,
