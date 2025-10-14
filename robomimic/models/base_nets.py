@@ -227,6 +227,16 @@ class Transpose(Module):
         return output_shape
 
 
+class RMSNorm(Module):
+
+    def __init__(self, dim):
+        super(RMSNorm, self).__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        return F.rms_norm(x, x.shape)
+
+
 class Flatten(Module):
 
     def __init__(self, start_dim: int, end_dim: int):

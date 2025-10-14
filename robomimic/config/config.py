@@ -127,7 +127,7 @@ class Config(dict):
     def values_unlocked(self):
         """
         A context scope for modifying a Config object. Within the scope,
-        only values can be updated (new keys cannot be created). Upon 
+        only values can be updated (new keys cannot be created). Upon
         leaving the scope, the initial level of locking is restored.
         """
         lock_state = self._get_lock_state()
@@ -172,7 +172,7 @@ class Config(dict):
 
     def do_not_lock_keys(self):
         """
-        Calling this function on this config indicates that key updates should be 
+        Calling this function on this config indicates that key updates should be
         allowed even when this config is key-locked (but not when it is completely
         locked). This is convenient for attributes that contain kwargs, where there
         might be a variable type and number of arguments contained in the sub-config.
@@ -182,7 +182,7 @@ class Config(dict):
     @property
     def key_lockable(self):
         """
-        Returns true if this config is key-lockable (new keys cannot be inserted in a 
+        Returns true if this config is key-lockable (new keys cannot be inserted in a
         key-locked lock level).
         """
         return not object.__getattribute__(self, '__do_not_lock_keys')

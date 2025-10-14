@@ -548,7 +548,6 @@ class DiffusionPolicyTransformer(PolicyAlgo):
         """
         B = batch["actions"].shape[0]
 
-
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(DiffusionPolicyTransformer, self).train_on_batch(batch, epoch, validate=validate)
             actions = batch["actions"]

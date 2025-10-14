@@ -30,7 +30,7 @@
             "enabled": true,
             "n": 50,
             "horizon": 700,
-            "rate": 50,
+            "rate": 20,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -42,7 +42,7 @@
         "output_dir": "../ebt_policy_trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
-        "hdf5_cache_mode": "low_dim",
+        "hdf5_cache_mode": "all",
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
@@ -102,28 +102,21 @@
             "attn_dropout": 0.3,
             "proj_dropout": 0.0
         },
-
         "ema": {
             "enabled": true,
             "power": 0.75
         },
-        "ddpm": {
-            "enabled": true,
-            "num_train_timesteps": 100,
-            "num_inference_timesteps": 100,
-            "beta_schedule": "squaredcos_cap_v2",
-            "clip_sample": true,
-            "prediction_type": "epsilon"
-        },
-        "ddim": {
-            "enabled": false,
-            "num_train_timesteps": 100,
-            "num_inference_timesteps": 10,
-            "beta_schedule": "squaredcos_cap_v2",
-            "clip_sample": true,
-            "set_alpha_to_one": true,
-            "steps_offset": 0,
-            "prediction_type": "epsilon"
+        "ebt": {
+            "randomize_mcmc_step_size_scale": 1,
+            "randomize_mcmc_num_steps": 3,
+            "mcmc_num_steps": 3,
+            "mcmc_step_size": 10000,
+            "clamp_future_grads": false,
+            "clamp_futures_grad_max_change": 9.0,
+            "mcmc_step_size_learnable": false,
+            "langevin_dynamics_noise_std": 0.05,
+            "truncate_mcmc": false
+
         }
     },
     "observation": {
@@ -154,7 +147,7 @@
                 "obs_randomizer_kwargs": {}
             },
             "rgb": {
-                "core_class": "VisionTokeniser",
+                "core_class": "VisualCore",
                 "core_kwargs": {
                     "dropout": 0.0
                 },

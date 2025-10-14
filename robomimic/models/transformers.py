@@ -524,7 +524,7 @@ def modulate(x, shift, scale):
     return x * (1 + scale) + shift
 
 
-class FinalLayer(nn.Module):
+class DiTFinalLayer(nn.Module):
     """
     The final layer of the diffusion model.
     """
@@ -550,6 +550,31 @@ class FinalLayer(nn.Module):
         shift, scale = self.adaLN_modulation(t).chunk(2, dim=-1)
         x = self.norm_final(x)
         x = modulate(x, shift, scale)
+        x = self.linear(x)
+
+        return x
+
+
+class EBTFinalLayer(nn.Module):
+    """
+    The final layer of the diffusion model.
+    """
+
+    def __init__(self, hidden_size, out_channels, drop):
+        super().__init__()
+        self.norm_final = RmsNorm(hidden_size, eps=1e-6)
+        def approx_gelu(): return nn.GELU(approximate="tanh")
+        self.linear = Mlp(
+            in_features=hidden_size,
+            hidden_features=hidden_size,
+            out_features=out_channels,
+            act_layer=approx_gelu,
+            drop=drop,
+            bias=True
+        )
+
+    def forward(self, x):
+        x = self.norm_final(x)
         x = self.linear(x)
 
         return x
@@ -640,7 +665,7 @@ class DiT(nn.Module):
             )
             for _ in range(depth)
         ])
-        self.final_layer = FinalLayer(
+        self.final_layer = DiTFinalLayer(
             hidden_size=dim,
             out_channels=output_dim,
             drop=proj_drop
@@ -679,3 +704,108 @@ class DiT(nn.Module):
         # Zero-out output layers:
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+
+
+class EBTBlock(nn.Module):
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 proj_drop,
+                 attn_drop,
+                 **block_kwargs):
+        super().__init__()
+        self.norm1 = RmsNorm(hidden_size, eps=1e-6)
+        self.attn = Attention(
+            dim=hidden_size, num_heads=num_heads,
+            qkv_bias=True, qk_norm=True,
+            norm_layer=RmsNorm,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            **block_kwargs)
+        self.cross_attn = CrossAttention(
+            hidden_size, num_heads=num_heads,
+            qkv_bias=True, qk_norm=True,
+            norm_layer=RmsNorm,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            **block_kwargs)
+
+        self.norm2 = RmsNorm(hidden_size, eps=1e-6)
+        def approx_gelu(): return nn.GELU(approximate="tanh")
+        self.ffn = Mlp(
+            in_features=hidden_size,
+            hidden_features=hidden_size,
+            act_layer=approx_gelu,
+            drop=proj_drop
+        )
+
+        self.norm3 = RmsNorm(hidden_size, eps=1e-6)
+
+    def forward(self, x, c, mask=None, memory_mask=None):
+        origin_x = x
+        x = self.norm1(x)
+        x = self.attn(x, mask)
+        x = x + origin_x
+
+        origin_x = x
+        x = self.norm2(x)
+        x = self.cross_attn(x, c, memory_mask)
+        x = x + origin_x
+
+        origin_x = x
+        x = self.norm3(x)
+        x = self.ffn(x)
+        x = x + origin_x
+
+        return x
+
+
+class EBT(nn.Module):
+    def __init__(
+        self,
+        dim,
+        depth,
+        heads,
+        output_dim,
+        attn_drop,
+        proj_drop
+    ) -> None:
+        super().__init__()
+        self.num_heads = heads
+        self.layers = nn.ModuleList([
+            EBTBlock(
+                hidden_size=dim,
+                num_heads=heads,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop
+            )
+            for _ in range(depth)
+        ])
+        self.final_layer = EBTFinalLayer(
+            hidden_size=dim,
+            out_channels=output_dim,
+            drop=proj_drop
+        )
+
+        self._init_weights()
+
+    def forward(self, x, c, mask=None, memory_mask=None):
+        for layer in self.layers:
+            x = layer(x, c, mask, memory_mask)
+        x = self.final_layer(x)
+
+        return x
+
+    def _init_weights(self) -> None:
+        """
+        Initialises all the ffn weights in the DiT encoder and separation
+        special token with xavier uniform/normal distribution, and the
+        positional embeddings to sin-cos
+        """
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
+        self.apply(_basic_init)
