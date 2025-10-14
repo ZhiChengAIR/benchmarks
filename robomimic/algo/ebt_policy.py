@@ -346,10 +346,10 @@ class EBTPolicy(PolicyAlgo):
                 inputs["obs"][k] = inputs["obs"][k].unsqueeze(1)
             assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
 
-        obs_features = self.nets["policy"]["obs_tokeniser"](**inputs)
+        obs_features = nets["policy"]["obs_tokeniser"](**inputs)
         assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]
-        obs_cond = self.nets["policy"]["obs_temporal_encoder"](
+        obs_cond = nets["policy"]["obs_temporal_encoder"](
             obs_features,
             mask=None
         )
@@ -370,7 +370,7 @@ class EBTPolicy(PolicyAlgo):
 
         for k in self.noise_scheduler.timesteps:
             # predict noise
-            noise_pred = self.nets["policy"]["noise_pred_net"](
+            noise_pred = nets["policy"]["noise_pred_net"](
                 sample=action,
                 timestep=k,
                 cond=obs_cond,

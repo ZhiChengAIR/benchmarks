@@ -23,6 +23,8 @@ class EBTPolicyConfig(BaseConfig):
         # set compatible data loading parameters
         self.train.seq_length = 16 # should match self.algo.horizon.prediction_horizon
         self.train.frame_stack = 2 # should match self.algo.horizon.observation_horizon
+        self.train.hdf5_filter_key = "train"
+        self.train.hdf5_validation_filter_key = "valid"
 
     def algo_config(self):
         """
