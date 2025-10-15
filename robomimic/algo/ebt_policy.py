@@ -119,6 +119,7 @@ class EBTPolicy(PolicyAlgo):
         self.truncate_mcmc = self.algo_config.ebt.truncate_mcmc
         self.langevin_dynamics_noise_std = torch.tensor(self.algo_config.ebt.langevin_dynamics_noise_std)
         self.ebl_norm = RMSNorm(self.ac_dim)
+        print("truncate_mcmc: ", self.truncate_mcmc)
 
     def process_batch_for_training(self, batch):
         """
@@ -272,6 +273,7 @@ class EBTPolicy(PolicyAlgo):
                     net=self.nets,
                     optim=self.optimizers["policy"],
                     loss=loss,
+                    max_grad_norm=1.0
                 )
 
                 # update Exponential Moving Average of the model weights

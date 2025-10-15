@@ -132,7 +132,7 @@ class EnvPushT(EB.EnvBase, gym.Env):
         obs_modality_specs = {
             "obs": {
                 "low_dim": [],
-                "rgb": ["birdseye_image"],
+                "rgb": ["image"],
             }
         }
         ObsUtils.initialize_obs_utils_with_obs_specs(obs_modality_specs)
@@ -175,6 +175,7 @@ class EnvPushT(EB.EnvBase, gym.Env):
         self._set_state(state)
         return self.get_observation()
 
+    @property
     def action_dimension(self):
         return self.ac_dim
 
@@ -213,7 +214,7 @@ class EnvPushT(EB.EnvBase, gym.Env):
 
         return observation, reward, done, info
 
-    def render(self, mode):
+    def render(self, mode, **kwargs):
         return self._render_frame(mode)
 
     def get_state(self):
@@ -226,13 +227,14 @@ class EnvPushT(EB.EnvBase, gym.Env):
         img = self._render_frame(mode='rgb_array')
 
         img_obs = np.moveaxis(img.astype(np.float32) / 255, -1, 0)
+        img_obs = img
         state = np.array(
             tuple(self.agent.position) \
             + tuple(self.block.position) \
             + (self.block.angle % (2 * np.pi),))
 
         obs = {
-            'birdseye_image': img_obs,
+            'image': img_obs,
             'state': state
         }
 
@@ -251,7 +253,7 @@ class EnvPushT(EB.EnvBase, gym.Env):
 
     def is_success(self):
         assert self._current_done is not None
-        return self._current_done
+        return {"task": self._current_done}
 
     def is_done(self):
         assert self._current_done is not None

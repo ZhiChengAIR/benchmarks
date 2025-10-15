@@ -61,7 +61,7 @@ def convert_pusht_zarr_to_hdf5(pusht_dataset: zarr.Group, output_filepath):
                 "damping": 0.0,
                 "legacy": False,
                 "render_size": 96,
-                "reset_to_state": False
+                "reset_to_state": None
             },
             "render_gpu_device_id": 0,
             "camera_depths": False,

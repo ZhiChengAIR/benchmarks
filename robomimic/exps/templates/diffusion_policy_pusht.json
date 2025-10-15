@@ -45,7 +45,7 @@
         "hdf5_cache_mode": "low_dim",
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
-        "hdf5_normalize_obs": false,
+        "hdf5_normalize_obs": true,
         "hdf5_filter_key": null,
         "hdf5_validation_filter_key": null,
         "seq_length": 16,
@@ -142,8 +142,7 @@
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "state",
-                    "keypoints"
+                    "state"
                 ],
                 "rgb": ["image"],
                 "depth": [],
