@@ -4,6 +4,7 @@ Source code: https://github.com/real-stanford/diffusion_policy/blob/main/diffusi
 """
 import gym
 from gym import spaces
+from copy import deepcopy
 
 import json
 import numpy as np
@@ -33,12 +34,13 @@ def pymunk_to_shapely(body, shapes):
     return geom
 
 
-class PushTEnv(EB.EnvBase, gym.Env):
+class EnvPushT(EB.EnvBase, gym.Env):
     metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 10}
     reward_range = (0., 1.)
 
     def __init__(
         self,
+        env_name,
         legacy=False,
         block_cog=None,
         damping=None,
@@ -47,8 +49,9 @@ class PushTEnv(EB.EnvBase, gym.Env):
         render_size=96,
         use_image_obs=True,
         reset_to_state=None,
+        **kwargs
     ):
-        super(PushTEnv, self).__init__(
+        super(EnvPushT, self).__init__(
             env_name="PushT",
             render=render,
             render_offscreen=render_offscreen,
@@ -249,6 +252,24 @@ class PushTEnv(EB.EnvBase, gym.Env):
     def is_success(self):
         assert self._current_done is not None
         return self._current_done
+
+    def is_done(self):
+        assert self._current_done is not None
+        return self._current_done
+
+    def get_reward(self):
+        return None
+
+    @property
+    def rollout_exceptions(self):
+        return ()
+
+    def set_goal(self):
+        pass
+
+    @property
+    def type(self):
+        return EB.EnvType.PUSHT_TYPE
 
     def get_goal(self, pose):
         mass = 1
@@ -471,6 +492,25 @@ class PushTEnv(EB.EnvBase, gym.Env):
         """
         Pretty-print env description.
         """
-        return self.name + "\n" + json.dumps(
-            self._init_kwargs, sort_keys=True, indent=4
+        return self.name + "\n" + json.dumps(self.serialize(), sort_keys=True, indent=4)
+
+    @property
+    def name(self):
+        return self.env_name
+
+    def serialize(self):
+        """
+        Save all information needed to re-instantiate this environment in a dictionary.
+        This is the same as @env_meta - environment metadata stored in hdf5 datasets,
+        and used in utils/env_utils.py.
+        """
+        return dict(
+            type=self.type,
+            seed=self._seed,
+            render_size=self.render_size,
+            legacy=self.legacy,
+            damping=self.damping,
+            block_cog=self.block_cog,
+            render_action=self.render_action,
+            render_cache=self.render_cache
         )

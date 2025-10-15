@@ -34,6 +34,11 @@ setup(
         "diffusers==0.11.1",
         "einops",
         "timm"
+        "gym==0.26.2",
+        "pygame==2.6.1",
+        "pymunk==6.11.1",
+        "shapely==2.0.7",
+        "scikit-image==0.21.0"
     ],
     eager_resources=['*'],
     include_package_data=True,

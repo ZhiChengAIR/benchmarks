@@ -14,6 +14,7 @@ class EnvType:
     ROBOSUITE_TYPE = 1
     GYM_TYPE = 2
     IG_MOMART_TYPE = 3
+    PUSHT_TYPE = 4
 
 
 class EnvBase(abc.ABC):
@@ -21,11 +22,11 @@ class EnvBase(abc.ABC):
     @abc.abstractmethod
     def __init__(
         self,
-        env_name, 
-        render=False, 
-        render_offscreen=False, 
-        use_image_obs=False, 
-        use_depth_obs=False, 
+        env_name,
+        render=False,
+        render_offscreen=False,
+        use_image_obs=False,
+        use_depth_obs=False,
         **kwargs,
     ):
         """
@@ -81,7 +82,7 @@ class EnvBase(abc.ABC):
 
         Args:
             state (dict): current simulator state
-        
+
         Returns:
             observation (dict): observation dictionary after setting the simulator state
         """
@@ -184,21 +185,21 @@ class EnvBase(abc.ABC):
     @classmethod
     @abc.abstractmethod
     def create_for_data_processing(
-        cls, 
-        camera_names, 
-        camera_height, 
-        camera_width, 
-        reward_shaping, 
-        render=None, 
-        render_offscreen=None, 
-        use_image_obs=None, 
-        use_depth_obs=None, 
+        cls,
+        camera_names,
+        camera_height,
+        camera_width,
+        reward_shaping,
+        render=None,
+        render_offscreen=None,
+        use_image_obs=None,
+        use_depth_obs=None,
         **kwargs,
     ):
         """
         Create environment for processing datasets, which includes extracting
         observations, labeling dense / sparse rewards, and annotating dones in
-        transitions. 
+        transitions.
 
         Args:
             camera_names ([str]): list of camera names that correspond to image observations

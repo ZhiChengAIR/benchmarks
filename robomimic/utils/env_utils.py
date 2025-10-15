@@ -41,6 +41,9 @@ def get_env_class(env_meta=None, env_type=None, env=None):
     elif env_type == EB.EnvType.IG_MOMART_TYPE:
         from robomimic.envs.env_ig_momart import EnvGibsonMOMART
         return EnvGibsonMOMART
+    elif env_type == EB.EnvType.PUSHT_TYPE:
+        from robomimic.envs.env_pusht import EnvPushT
+        return EnvPushT
     raise Exception("code should never reach this point")
 
 
@@ -139,11 +142,11 @@ def is_robosuite_env(env_meta=None, env_type=None, env=None):
 
 def create_env(
     env_type,
-    env_name,  
-    render=False, 
-    render_offscreen=False, 
-    use_image_obs=False, 
-    use_depth_obs=False, 
+    env_name,
+    render=False,
+    render_offscreen=False,
+    use_image_obs=False,
+    use_depth_obs=False,
     lang=None,
     **kwargs,
 ):
@@ -174,9 +177,9 @@ def create_env(
 
     env_class = get_env_class(env_type=env_type)
     env = env_class(
-        env_name=env_name, 
-        render=render, 
-        render_offscreen=render_offscreen, 
+        env_name=env_name,
+        render=render,
+        render_offscreen=render_offscreen,
         use_image_obs=use_image_obs,
         use_depth_obs=use_depth_obs,
         lang=lang,
@@ -189,11 +192,11 @@ def create_env(
 
 def create_env_from_metadata(
     env_meta,
-    env_name=None,  
-    render=False, 
-    render_offscreen=False, 
-    use_image_obs=False, 
-    use_depth_obs=False, 
+    env_name=None,
+    render=False,
+    render_offscreen=False,
+    use_image_obs=False,
+    use_depth_obs=False,
 ):
     """
     Create environment.
@@ -232,10 +235,10 @@ def create_env_from_metadata(
 
     env = create_env(
         env_type=env_type,
-        render=render, 
-        render_offscreen=render_offscreen, 
-        use_image_obs=use_image_obs, 
-        use_depth_obs=use_depth_obs, 
+        render=render,
+        render_offscreen=render_offscreen,
+        use_image_obs=use_image_obs,
+        use_depth_obs=use_depth_obs,
         lang=lang,
         **env_kwargs,
     )
@@ -245,15 +248,15 @@ def create_env_from_metadata(
 
 def create_env_for_data_processing(
     env_meta,
-    camera_names, 
-    camera_height, 
-    camera_width, 
+    camera_names,
+    camera_height,
+    camera_width,
     reward_shaping,
     env_class=None,
-    render=None, 
-    render_offscreen=None, 
-    use_image_obs=None, 
-    use_depth_obs=None, 
+    render=None,
+    render_offscreen=None,
+    use_image_obs=None,
+    use_depth_obs=None,
 ):
     """
     Creates environment for processing dataset observations and rewards.
@@ -302,14 +305,14 @@ def create_env_for_data_processing(
     env_kwargs.pop("use_depth_obs", None)
 
     env = env_class.create_for_data_processing(
-        env_name=env_name, 
-        camera_names=camera_names, 
-        camera_height=camera_height, 
-        camera_width=camera_width, 
-        reward_shaping=reward_shaping, 
-        render=render, 
-        render_offscreen=render_offscreen, 
-        use_image_obs=use_image_obs, 
+        env_name=env_name,
+        camera_names=camera_names,
+        camera_height=camera_height,
+        camera_width=camera_width,
+        reward_shaping=reward_shaping,
+        render=render,
+        render_offscreen=render_offscreen,
+        use_image_obs=use_image_obs,
         use_depth_obs=use_depth_obs,
         **env_kwargs,
     )

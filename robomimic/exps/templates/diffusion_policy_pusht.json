@@ -1,5 +1,5 @@
 {
-    "algo_name": "ebt_policy",
+    "algo_name": "diffusion_policy",
     "experiment": {
         "name": "test",
         "validate": false,
@@ -30,7 +30,7 @@
             "enabled": true,
             "n": 50,
             "horizon": 700,
-            "rate": 10,
+            "rate": 50,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../ebt_policy_trained_models",
+        "output_dir": "../pusht_diffusion_policy_trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
@@ -62,7 +62,7 @@
         ],
         "action_config": {
             "actions": {
-                "normalization": null
+                "normalization": "min_max"
             }
         },
         "goal_mode": null,
@@ -95,40 +95,57 @@
             "action_horizon": 8,
             "prediction_horizon": 16
         },
+        "unet": {
+            "enabled": false,
+            "diffusion_step_embed_dim": 256,
+            "down_dims": [
+                256,
+                512,
+                1024
+            ],
+            "kernel_size": 5,
+            "n_groups": 8
+        },
         "transformer": {
+            "enabled": true,
             "embed_dim": 256,
             "num_layers": 8,
             "num_heads": 4,
             "attn_dropout": 0.3,
             "proj_dropout": 0.0
         },
+
         "ema": {
             "enabled": true,
             "power": 0.75
         },
-        "ebt": {
-            "randomize_mcmc_step_size_scale": 1,
-            "randomize_mcmc_num_steps": 3,
-            "mcmc_num_steps": 16,
-            "mcmc_step_size": 10000,
-            "clamp_future_grads": false,
-            "clamp_futures_grad_max_change": 9.0,
-            "mcmc_step_size_learnable": false,
-            "langevin_dynamics_noise_std": 0.05,
-            "truncate_mcmc": false
-
+        "ddpm": {
+            "enabled": true,
+            "num_train_timesteps": 100,
+            "num_inference_timesteps": 100,
+            "beta_schedule": "squaredcos_cap_v2",
+            "clip_sample": true,
+            "prediction_type": "epsilon"
+        },
+        "ddim": {
+            "enabled": false,
+            "num_train_timesteps": 100,
+            "num_inference_timesteps": 10,
+            "beta_schedule": "squaredcos_cap_v2",
+            "clip_sample": true,
+            "set_alpha_to_one": true,
+            "steps_offset": 0,
+            "prediction_type": "epsilon"
         }
     },
     "observation": {
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "robot0_eef_pos",
-                    "robot0_eef_quat",
-                    "robot0_gripper_qpos",
-                    "object"
+                    "state",
+                    "keypoints"
                 ],
-                "rgb": ["agentview_image", "robot0_eye_in_hand_image"],
+                "rgb": ["image"],
                 "depth": [],
                 "scan": []
             },
@@ -148,9 +165,7 @@
             },
             "rgb": {
                 "core_class": "VisualCore",
-                "core_kwargs": {
-                    "dropout": 0.0
-                },
+                "core_kwargs": {},
                 "obs_randomizer_class": null,
                 "obs_randomizer_kwargs": {}
             },
