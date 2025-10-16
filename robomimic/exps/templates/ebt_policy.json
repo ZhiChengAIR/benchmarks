@@ -30,7 +30,7 @@
             "enabled": true,
             "n": 50,
             "horizon": 700,
-            "rate": 5,
+            "rate": 20,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -109,7 +109,7 @@
         "ebt": {
             "randomize_mcmc_step_size_scale": 1,
             "randomize_mcmc_num_steps": 3,
-            "mcmc_num_steps": 16,
+            "mcmc_num_steps": 3,
             "mcmc_step_size": 10000,
             "clamp_future_grads": false,
             "clamp_futures_grad_max_change": 9.0,
