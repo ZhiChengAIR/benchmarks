@@ -34,6 +34,7 @@ setup(
         "diffusers==0.11.1",
         "einops",
         "timm"
+        "zarr",
         "gym==0.26.2",
         "pygame==2.6.1",
         "pymunk==6.11.1",
