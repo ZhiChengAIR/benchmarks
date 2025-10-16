@@ -1,4 +1,4 @@
-# EBT Policy Benchmarks
+# Policy Benchmarks
 
 <p align="center">
   <img width="24.0%" src="docs/images/task_lift.gif">
@@ -40,8 +40,8 @@ pip install -r requirements.txt
 cd ..
 
 # Install project
-git clone https://github.com/ZhiChengAIR/ebt_policy_benchmarks.git
-cd ebt_policy_benchmarks
+git clone https://github.com/ZhiChengAIR/benchmarks.git
+cd benchmarks
 pip install -e .
 ```
 
