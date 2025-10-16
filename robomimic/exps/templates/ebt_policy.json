@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../ebt_system_2",
+        "output_dir": "../ebt_policy_trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
@@ -115,7 +115,7 @@
             "clamp_futures_grad_max_change": 9.0,
             "mcmc_step_size_learnable": false,
             "langevin_dynamics_noise_std": 0.05,
-            "truncate_mcmc": true
+            "truncate_mcmc": false
 
         }
     },
