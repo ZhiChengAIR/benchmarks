@@ -44,7 +44,7 @@ class EnvPushT(EB.EnvBase, gym.Env):
         legacy=False,
         block_cog=None,
         damping=None,
-        render=False,
+        render=True,
         render_offscreen=False,
         render_size=96,
         use_image_obs=True,

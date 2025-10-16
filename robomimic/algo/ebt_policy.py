@@ -8,20 +8,16 @@ from packaging.version import parse as parse_version
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 from diffusers.training_utils import EMAModel
 
-import robomimic.models.obs_tokenisers as ObsTok
 import robomimic.models.obs_nets as ObsNets
 from robomimic.models.base_nets import RMSNorm
 import robomimic.models.ebt_policy_nets as EBTNets
-import robomimic.models.diffusion_policy_nets as DPNets
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.token_utils as TokUtils
 
-from robomimic.models.transformers import SpatioTemporalEncoder
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
 
@@ -59,7 +55,7 @@ class EBTPolicy(PolicyAlgo):
         # replace all BatchNorm with GroupNorm to work with EMA
         # performance will tank if you forget to do this!
         obs_encoder = replace_bn_with_gn(obs_encoder)
-        obs_temporal_encoder = DPNets.ObsTemporalEncoder(
+        obs_temporal_encoder = EBTNets.ObsTemporalEncoder(
             input_dim=obs_dim,
             embed_dim=self.algo_config.transformer.embed_dim,
             num_layers=self.algo_config.transformer.num_layers,
@@ -105,13 +101,16 @@ class EBTPolicy(PolicyAlgo):
         self.action_check_done = False
         self.obs_queue = None
         self.action_queue = None
+
         self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
         self.randomize_mcmc_num_steps = self.algo_config.ebt.randomize_mcmc_num_steps
         self.mcmc_step_size = self.algo_config.ebt.mcmc_step_size
         self.alpha = nn.Parameter(
             torch.tensor(
-                float(self.mcmc_step_size)),
-            requires_grad=self.algo_config.ebt.mcmc_step_size_learnable
+                float(self.mcmc_step_size),
+                device=self.device
+            ),
+            requires_grad=self.algo_config.ebt.mcmc_step_size_learnable,
         )
         self.clamp_futures_grad = self.algo_config.ebt.clamp_future_grads
         self.clamp_futures_grad_max_change = self.algo_config.ebt.clamp_futures_grad_max_change
@@ -220,6 +219,8 @@ class EBTPolicy(PolicyAlgo):
                 i: int
             ):
                 trajectory = trajectory.detach().requires_grad_()
+                if i < num_mcmc_steps - 1:
+                    trajectory = self.ebl_norm(trajectory)
 
                 if self.langevin_dynamics_noise_std != 0:
                     ld_noise = torch.randn_like(
@@ -234,9 +235,7 @@ class EBTPolicy(PolicyAlgo):
                     memory_mask=memory_mask
                 )
 
-                energy_preds = self.ebl_norm(energy_pred)
-
-                energy_pred = energy_preds.mean(dim=(-1, -2))
+                energy_pred = energy_pred.mean(dim=(-1, -2))
                 predicted_energies_list.append(energy_pred)
 
                 predicted_traj_grad = self._compute_grad(
@@ -439,13 +438,17 @@ class EBTPolicy(PolicyAlgo):
         batch_size: int
     ) -> float:
         alpha = torch.clamp(self.alpha, min=0.0001)
+
         if not no_randomness and self.randomize_mcmc_step_size_scale != 1:
-            expanded_alpha = alpha.expand(batch_size, 1, 1, 1)
+            expanded_alpha = alpha.expand(batch_size, 1, 1)
 
             scale = self.randomize_mcmc_step_size_scale
             low = alpha / scale
             high = alpha * scale
-            alpha = low + torch.rand_like(expanded_alpha) * (high - low)
+            alpha = low + torch.rand_like(
+                expanded_alpha,
+                device=expanded_alpha.device
+            ) * (high - low)
 
         return alpha
 

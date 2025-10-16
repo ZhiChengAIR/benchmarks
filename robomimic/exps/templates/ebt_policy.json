@@ -151,8 +151,22 @@
                 "core_kwargs": {
                     "dropout": 0.0
                 },
-                "obs_randomizer_class": null,
-                "obs_randomizer_kwargs": {}
+                "obs_randomizer_class": ["CropRandomizer", "ColorRandomizer"],
+                "obs_randomizer_kwargs": [
+                    {
+                        "crop_shape": 76,
+                        "crop_height": 76,
+                        "num_crops": 1,
+                        "pos_enc": false
+                    },
+                    {
+                        "brightness": 0.3,
+                        "contrast": 0.3,
+                        "saturation": 0.3,
+                        "hue": 0.3,
+                        "num_samples": 1
+                    }
+                ]
             },
             "depth": {
                 "core_class": "VisualCore",

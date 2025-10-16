@@ -9,9 +9,9 @@
                 "program": "${workspaceRoot}/robomimic/scripts/train.py",
                 "args": [
                     "--config",
-                    "../exps/templates/diffusion_policy_pusht.json",
+                    "../exps/templates/ebt_policy.json",
                     "--dataset",
-                    "/data/pusht/dataset.hdf5"
+                    "${workspaceRoot}/datasets/square/ph/image_v15.hdf5"
                 ],
                 "stopOnEntry": true,
                 "console": "integratedTerminal"
