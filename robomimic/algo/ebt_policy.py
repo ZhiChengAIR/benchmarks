@@ -102,7 +102,7 @@ class EBTPolicy(PolicyAlgo):
         self.obs_queue = None
         self.action_queue = None
 
-        self.scale_alpha_with_energy_temp = self.algo_config.scale_alpha_with_energy_temp
+        self.scale_alpha_with_energy_temp = self.algo_config.ebt.scale_alpha_with_energy_temp
         self.randomize_mcmc_num_steps = self.algo_config.ebt.randomize_mcmc_num_steps
         self.mcmc_step_size = self.algo_config.ebt.mcmc_step_size
         self.alpha = nn.Parameter(
@@ -230,13 +230,14 @@ class EBTPolicy(PolicyAlgo):
                     cond=cond_tokens,
                     memory_mask=memory_mask
                 )
+                energy_pred = energy_pred.mean(dim=(-1, -2))
+
                 alpha = self._compute_alpha(
                     energy_pred=energy_pred,
                     no_randomness=False,
                     batch_size=B
                 )
 
-                energy_pred = energy_pred.mean(dim=(-1, -2))
                 predicted_energies_list.append(energy_pred)
 
                 predicted_traj_grad = self._compute_grad(
@@ -404,13 +405,12 @@ class EBTPolicy(PolicyAlgo):
                 cond=cond_tokens,
                 memory_mask=memory_mask
             )
+            energy_pred = energy_pred.mean(dim=(-1, -2))
             alpha = self._compute_alpha(
                 energy_pred=energy_pred,
                 no_randomness=True,
                 batch_size=B,
             )
-
-            energy_pred = energy_pred.mean(dim=(-1, -2))
 
             predicted_traj_grad = self._compute_grad(
                 energy_pred=energy_pred,
@@ -442,10 +442,9 @@ class EBTPolicy(PolicyAlgo):
         batch_size: int,
     ) -> float:
         alpha = torch.clamp(self.alpha, min=0.0001)
-
         expanded_alpha = alpha.expand(batch_size, 1, 1)
         exponentiated_energies = torch.exp(
-            energy_pred.reshape(energy_pred.shape[0], energy_pred.shape[1], 1)
+            energy_pred[:, None, None]
         ) / self.scale_alpha_with_energy_temp
         energy_scaled_alpha = expanded_alpha * exponentiated_energies
 

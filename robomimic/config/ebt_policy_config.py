@@ -63,7 +63,7 @@ class EBTPolicyConfig(BaseConfig):
         self.algo.ema.enabled = True
         self.algo.ema.power = 0.75
 
-        self.algo.ebt.randomize_mcmc_step_size_scale = 1
+        self.algo.ebt.scale_alpha_with_energy_temp = 1
         self.algo.ebt.randomize_mcmc_num_steps = 3
         self.algo.ebt.mcmc_num_steps = 3
         self.algo.ebt.mcmc_step_size = 10000
