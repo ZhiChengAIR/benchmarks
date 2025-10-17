@@ -1,7 +1,7 @@
 """
 Implementation of EBT Policy https://diffusion-policy.cs.columbia.edu/ by Cheng Chi
 """
-from typing import Callable, Union, Sequence
+from typing import Callable, Union, Sequence, Optional, List
 import random
 from collections import OrderedDict, deque
 from packaging.version import parse as parse_version
@@ -209,55 +209,20 @@ class EBTPolicy(PolicyAlgo):
                 no_randomness=False
             )
 
-            def energy_step(
-                trajectory: torch.Tensor,
-                cond_tokens: torch.Tensor,
-                i: int
-            ):
-                trajectory = trajectory.detach().requires_grad_()
-                if i < num_mcmc_steps - 1:
-                    trajectory = self.ebl_norm(trajectory)
-
-                if self.langevin_dynamics_noise_std != 0:
-                    ld_noise = torch.randn_like(
-                        trajectory,
-                        device=trajectory.device,
-                    ) * langevin_dynamics_noise_std
-                    trajectory = trajectory + ld_noise
-
-                energy_pred = self.nets["policy"]["energy_pred_net"](
-                    sample=trajectory,
-                    cond=cond_tokens,
-                    memory_mask=memory_mask
-                )
-                energy_pred = energy_pred.mean(dim=(-1, -2))
-
-                alpha = self._compute_alpha(
-                    energy_pred=energy_pred,
-                    no_randomness=False,
-                    batch_size=B
-                )
-
-                predicted_energies_list.append(energy_pred)
-
-                predicted_traj_grad = self._compute_grad(
-                    energy_pred=energy_pred,
-                    trajectory=trajectory,
-                    step_no=i,
-                    num_mcmc_steps=num_mcmc_steps,
-                    create_graph=True
-                )
-
-                trajectory = trajectory - alpha * predicted_traj_grad
-
-                predicted_traj_list.append(trajectory)
-
-                return trajectory
-
             # Set to true for validation since grad would be off.
             with torch.set_grad_enabled(True):
                 for i in range(num_mcmc_steps):
-                    pred_action = energy_step(pred_action, obs_cond, i)
+                    pred_action = self._energy_step(
+                        trajectory=pred_action,
+                        cond_tokens=obs_cond,
+                        memory_mask=memory_mask,
+                        num_mcmc_steps=num_mcmc_steps,
+                        i=i,
+                        inference_mode=False,
+                        langevin_dynamics_noise_std=langevin_dynamics_noise_std,
+                        predicted_energies_list=predicted_energies_list,
+                        predicted_traj_list=predicted_traj_list,
+                    )
 
             loss_info, loss = compute_loss(
                 action,
@@ -286,6 +251,59 @@ class EBTPolicy(PolicyAlgo):
                 info.update(step_info)
 
         return info
+
+    def _energy_step(
+        self,
+        trajectory: torch.Tensor,
+        cond_tokens: torch.Tensor,
+        memory_mask: torch.Tensor,
+        num_mcmc_steps: int,
+        i: int,
+        inference_mode: bool,
+        langevin_dynamics_noise_std: Optional[torch.Tensor] = None,
+        predicted_energies_list: Optional[List[torch.Tensor]] = None,
+        predicted_traj_list: Optional[List[torch.Tensor]] = None
+    ):
+        B = trajectory.shape[0]
+        trajectory = trajectory.detach().requires_grad_()
+        if i < num_mcmc_steps - 1:
+            trajectory = self.ebl_norm(trajectory)
+
+        if inference_mode and self.langevin_dynamics_noise_std != 0:
+            ld_noise = torch.randn_like(
+                trajectory,
+                device=trajectory.device,
+            ) * langevin_dynamics_noise_std
+            trajectory = trajectory + ld_noise
+
+        energy_pred = self.nets["policy"]["energy_pred_net"](
+            sample=trajectory,
+            cond=cond_tokens,
+            memory_mask=memory_mask
+        )
+        energy_pred = energy_pred.mean(dim=(-1, -2))
+
+        alpha = self._compute_alpha(
+            energy_pred=energy_pred,
+            no_randomness=inference_mode,
+            batch_size=B
+        )
+
+        predicted_traj_grad = self._compute_grad(
+            energy_pred=energy_pred,
+            trajectory=trajectory,
+            step_no=i,
+            num_mcmc_steps=num_mcmc_steps,
+            create_graph=(not inference_mode)
+        )
+
+        trajectory = trajectory - alpha * predicted_traj_grad
+
+        if not inference_mode:
+            predicted_energies_list.append(energy_pred)
+            predicted_traj_list.append(trajectory)
+
+        return trajectory
 
     def log_info(self, info):
         """
@@ -391,43 +409,17 @@ class EBTPolicy(PolicyAlgo):
             no_randomness=True
         )
 
-        def energy_step(
-            trajectory: torch.Tensor,
-            cond_tokens: torch.Tensor,
-            i: int
-        ):
-            trajectory = trajectory.detach().requires_grad_()
-            if i < num_mcmc_steps - 1:
-                trajectory = self.ebl_norm(trajectory)
-
-            energy_pred = self.nets["policy"]["energy_pred_net"](
-                sample=trajectory,
-                cond=cond_tokens,
-                memory_mask=memory_mask
-            )
-            energy_pred = energy_pred.mean(dim=(-1, -2))
-            alpha = self._compute_alpha(
-                energy_pred=energy_pred,
-                no_randomness=True,
-                batch_size=B,
-            )
-
-            predicted_traj_grad = self._compute_grad(
-                energy_pred=energy_pred,
-                trajectory=trajectory,
-                step_no=i,
-                num_mcmc_steps=num_mcmc_steps,
-                create_graph=False
-            )
-
-            trajectory = trajectory - alpha * predicted_traj_grad
-
-            return trajectory
-
         # Set to true for validation since grad would be off.
         with torch.set_grad_enabled(True):
             for i in range(num_mcmc_steps):
-                action_pred = energy_step(action_pred, obs_cond, i)
+                action_pred = self._energy_step(
+                    trajectory=action_pred,
+                    cond_tokens=obs_cond,
+                    memory_mask=memory_mask,
+                    num_mcmc_steps=num_mcmc_steps,
+                    i=i,
+                    inference_mode=True
+                )
 
         start = To - 1
         end = start + Ta
