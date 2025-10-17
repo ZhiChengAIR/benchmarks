@@ -269,7 +269,7 @@ class EBTPolicy(PolicyAlgo):
         if i < num_mcmc_steps - 1:
             trajectory = self.ebl_norm(trajectory)
 
-        if inference_mode and self.langevin_dynamics_noise_std != 0:
+        if not inference_mode and self.langevin_dynamics_noise_std != 0:
             ld_noise = torch.randn_like(
                 trajectory,
                 device=trajectory.device,
