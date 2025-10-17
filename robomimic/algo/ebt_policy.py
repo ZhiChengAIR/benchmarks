@@ -102,7 +102,7 @@ class EBTPolicy(PolicyAlgo):
         self.obs_queue = None
         self.action_queue = None
 
-        self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
+        self.scale_alpha_with_energy_temp = self.algo_config.scale_alpha_with_energy_temp
         self.randomize_mcmc_num_steps = self.algo_config.ebt.randomize_mcmc_num_steps
         self.mcmc_step_size = self.algo_config.ebt.mcmc_step_size
         self.alpha = nn.Parameter(
@@ -205,10 +205,6 @@ class EBTPolicy(PolicyAlgo):
             langevin_dynamics_noise_std = torch.clamp(
                 self.langevin_dynamics_noise_std, min=0.000001
             )
-            alpha = self._compute_alpha(
-                no_randomness=False,
-                batch_size=B
-            )
             num_mcmc_steps = self._compute_num_mcmc_steps(
                 no_randomness=False
             )
@@ -233,6 +229,11 @@ class EBTPolicy(PolicyAlgo):
                     sample=trajectory,
                     cond=cond_tokens,
                     memory_mask=memory_mask
+                )
+                alpha = self._compute_alpha(
+                    energy_pred=energy_pred,
+                    no_randomness=False,
+                    batch_size=B
                 )
 
                 energy_pred = energy_pred.mean(dim=(-1, -2))
@@ -436,30 +437,19 @@ class EBTPolicy(PolicyAlgo):
 
     def _compute_alpha(
         self,
+        energy_pred: torch.Tensor,
         no_randomness: bool,
         batch_size: int,
-        energy_pred: torch.Tensor
     ) -> float:
         alpha = torch.clamp(self.alpha, min=0.0001)
 
-        if not no_randomness and self.randomize_mcmc_step_size_scale != 1:
-            expanded_alpha = alpha.expand(batch_size, 1, 1)
-
-            scale = self.randomize_mcmc_step_size_scale
-            low = alpha / scale
-            high = alpha * scale
-            alpha = low + torch.rand_like(
-                expanded_alpha,
-                device=expanded_alpha.device
-            ) * (high - low)
-
+        expanded_alpha = alpha.expand(batch_size, 1, 1)
         exponentiated_energies = torch.exp(
             energy_pred.reshape(energy_pred.shape[0], energy_pred.shape[1], 1)
         ) / self.scale_alpha_with_energy_temp
+        energy_scaled_alpha = expanded_alpha * exponentiated_energies
 
-        energy_scaled_alpha = self.ebl_alpha_step_size * exponentiated_energies
-
-        return alpha
+        return energy_scaled_alpha
 
     def _compute_num_mcmc_steps(self, no_randomness: bool) -> int:
         if no_randomness or self.randomize_mcmc_num_steps <= 0:
