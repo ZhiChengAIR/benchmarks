@@ -385,10 +385,6 @@ class EBTPolicy(PolicyAlgo):
             action_tokens=action_pred,
             cross_attention=True
         )
-        alpha = self._compute_alpha(
-            no_randomness=True,
-            batch_size=B,
-        )
         num_mcmc_steps = self._compute_num_mcmc_steps(
             no_randomness=True
         )
@@ -399,13 +395,19 @@ class EBTPolicy(PolicyAlgo):
             i: int
         ):
             trajectory = trajectory.detach().requires_grad_()
+            if i < num_mcmc_steps - 1:
+                trajectory = self.ebl_norm(trajectory)
+
             energy_pred = self.nets["policy"]["energy_pred_net"](
                 sample=trajectory,
                 cond=cond_tokens,
                 memory_mask=memory_mask
             )
-
-            energy_pred = self.ebl_norm(energy_pred)
+            alpha = self._compute_alpha(
+                energy_pred=energy_pred,
+                no_randomness=True,
+                batch_size=B,
+            )
 
             energy_pred = energy_pred.mean(dim=(-1, -2))
 
@@ -435,7 +437,8 @@ class EBTPolicy(PolicyAlgo):
     def _compute_alpha(
         self,
         no_randomness: bool,
-        batch_size: int
+        batch_size: int,
+        energy_pred: torch.Tensor
     ) -> float:
         alpha = torch.clamp(self.alpha, min=0.0001)
 
@@ -449,6 +452,12 @@ class EBTPolicy(PolicyAlgo):
                 expanded_alpha,
                 device=expanded_alpha.device
             ) * (high - low)
+
+        exponentiated_energies = torch.exp(
+            energy_pred.reshape(energy_pred.shape[0], energy_pred.shape[1], 1)
+        ) / self.scale_alpha_with_energy_temp
+
+        energy_scaled_alpha = self.ebl_alpha_step_size * exponentiated_energies
 
         return alpha
 
