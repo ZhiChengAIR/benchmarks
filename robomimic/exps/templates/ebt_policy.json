@@ -107,7 +107,8 @@
             "power": 0.75
         },
         "ebt": {
-            "scale_alpha_with_energy_temp": 0.5,
+            "randomize_mcmc_num_steps": 1.5,
+            "scale_alpha_with_energy_temp": 1,
             "randomize_mcmc_num_steps": 3,
             "mcmc_num_steps": 6,
             "mcmc_step_size": 1000,
