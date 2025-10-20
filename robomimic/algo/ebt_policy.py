@@ -435,12 +435,12 @@ class EBTPolicy(PolicyAlgo):
         batch_size: int,
     ) -> float:
         alpha = torch.clamp(self.alpha, min=0.0001)
-        expanded_alpha = alpha.expand(batch_size, 1, 1, 1)
+        expanded_alpha = alpha.expand(batch_size, 1, 1)
         if not no_randomness and self.randomize_mcmc_step_size_scale != 1:
             scale = self.randomize_mcmc_step_size_scale
             low = alpha / scale
             high = alpha * scale
-            alpha = low + torch.rand_like(expanded_alpha) * (high - low)
+            expanded_alpha = low + torch.rand_like(expanded_alpha) * (high - low)
 
         exponentiated_energies = torch.exp(
             energy_pred[:, None, None]
