@@ -118,6 +118,7 @@ class EBTPolicy(PolicyAlgo):
         self.truncate_mcmc = self.algo_config.ebt.truncate_mcmc
         self.langevin_dynamics_noise_std = torch.tensor(self.algo_config.ebt.langevin_dynamics_noise_std)
         self.ebl_norm = RMSNorm(self.ac_dim)
+        self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
 
     def process_batch_for_training(self, batch):
         """
@@ -434,7 +435,13 @@ class EBTPolicy(PolicyAlgo):
         batch_size: int,
     ) -> float:
         alpha = torch.clamp(self.alpha, min=0.0001)
-        expanded_alpha = alpha.expand(batch_size, 1, 1)
+        expanded_alpha = alpha.expand(batch_size, 1, 1, 1)
+        if not no_randomness and self.randomize_mcmc_step_size_scale != 1:
+            scale = self.randomize_mcmc_step_size_scale
+            low = alpha / scale
+            high = alpha * scale
+            alpha = low + torch.rand_like(expanded_alpha) * (high - low)
+
         exponentiated_energies = torch.exp(
             energy_pred[:, None, None]
         ) / self.scale_alpha_with_energy_temp

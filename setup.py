@@ -39,7 +39,8 @@ setup(
         "pygame==2.6.1",
         "pymunk==6.11.1",
         "shapely==2.0.7",
-        "scikit-image==0.21.0"
+        "scikit-image==0.21.0",
+        "protobuf==4.25.8"
     ],
     eager_resources=['*'],
     include_package_data=True,
