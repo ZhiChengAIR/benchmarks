@@ -28,7 +28,7 @@ conda activate ebt_policy
 
 2. Intall pytorch
 ```
-conda install pytorch==2.0.0 torchvision==0.15.1 -c pytorch
+conda install pytorch==2.0.0 torchvision==0.15.0 -c pytorch
 ```
 
 3. Install project
