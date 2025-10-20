@@ -33,7 +33,7 @@ setup(
         "transformers==4.41.2",
         "diffusers==0.11.1",
         "einops",
-        "timm"
+        "timm",
         "zarr",
         "gym==0.26.2",
         "pygame==2.6.1",

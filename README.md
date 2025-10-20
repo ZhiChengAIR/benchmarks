@@ -28,6 +28,7 @@ conda activate ebt_policy
 
 2. Intall pytorch
 ```
+
 conda install pytorch==2.0.0 torchvision==0.15.1 -c pytorch
 ```
 
@@ -51,7 +52,7 @@ For downloading the robomimic datasets, please visit the [documentation](https:/
 To train EBT Policy on a robomimic dataset, you can run the below command. Configurations can be altered [here](https://github.com/ZhiChengAIR/ebt_policy_benchmarks/blob/master/robomimic/exps/templates/ebt_policy.json).
 
 ```
-python robomimic/scripts/train.py --config robomimic/exps/templates/ebt_policy.json --dataset /path/to/dataset.hdf5
+python robomimic/scripts/train.py --config robomimic/exps/templates/ebt_policy.json --dataset /home/yiqihuang/Projects/robomimic/datasets/tool_hang/ph/image_v15.hdf5
 ```
 
 ## Reproducing PushT Benchmark

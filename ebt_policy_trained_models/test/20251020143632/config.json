@@ -38,7 +38,11 @@
         "ckpt_path": null
     },
     "train": {
-        "data": null,
+        "data": [
+            {
+                "path": "/home/yiqihuang/Projects/robomimic/datasets/tool_hang/ph/image_v15_84.hdf5"
+            }
+        ],
         "output_dir": "../ebt_policy_trained_models",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
@@ -87,7 +91,9 @@
                 },
                 "regularization": {
                     "L2": 1e-06
-                }
+                },
+                "num_train_batches": 300,
+                "num_epochs": 3000
             }
         },
         "horizon": {
@@ -96,6 +102,7 @@
             "prediction_horizon": 16
         },
         "transformer": {
+            "enabled": true,
             "embed_dim": 256,
             "num_layers": 8,
             "num_heads": 4,
@@ -107,7 +114,7 @@
             "power": 0.75
         },
         "ebt": {
-            "scale_alpha_with_energy_temp": 0.5,
+            "scale_alpha_with_energy_temp": 1,
             "randomize_mcmc_num_steps": 3,
             "mcmc_num_steps": 6,
             "mcmc_step_size": 1000,
@@ -116,7 +123,6 @@
             "mcmc_step_size_learnable": false,
             "langevin_dynamics_noise_std": 0.15,
             "truncate_mcmc": false
-
         }
     },
     "observation": {
@@ -128,7 +134,10 @@
                     "robot0_gripper_qpos",
                     "object"
                 ],
-                "rgb": ["sideview_image", "robot0_eye_in_hand_image"],
+                "rgb": [
+                    "sideview_image",
+                    "robot0_eye_in_hand_image"
+                ],
                 "depth": [],
                 "scan": []
             },
@@ -151,7 +160,9 @@
                 "core_kwargs": {
                     "dropout": 0.0
                 },
-                "obs_randomizer_class": ["CropRandomizer"],
+                "obs_randomizer_class": [
+                    "CropRandomizer"
+                ],
                 "obs_randomizer_kwargs": [
                     {
                         "crop_shape": 76,
