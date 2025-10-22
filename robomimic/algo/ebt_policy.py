@@ -458,6 +458,7 @@ class EBTPolicy(PolicyAlgo):
                 i += 1
             action_pred, _ = self._energy_step(
                 trajectory=action_pred,
+                velocity=velocity,
                 cond_tokens=obs_cond,
                 memory_mask=memory_mask,
                 final_stop=True,
