@@ -119,6 +119,8 @@ class EBTPolicy(PolicyAlgo):
         self.langevin_dynamics_noise_std = torch.tensor(self.algo_config.ebt.langevin_dynamics_noise_std)
         self.ebl_norm = RMSNorm(self.ac_dim)
         self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
+        self.max_mcmc_steps = self.algo_config.ebt.max_mcmc_steps
+        self.min_grad = self.algo_config.ebt.min_grad
 
     def process_batch_for_training(self, batch):
         """
@@ -185,7 +187,6 @@ class EBTPolicy(PolicyAlgo):
                 assert inputs["obs"][k].ndim - 2 == len(self.obs_shapes[k])
 
             obs_features = TensorUtils.time_distributed(inputs, self.nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
-            B = obs_features.shape[0]
             assert obs_features.ndim == 3  # [B, T, D]
             obs_cond = self.nets["policy"]["obs_temporal_encoder"](
                 obs_features
@@ -209,21 +210,23 @@ class EBTPolicy(PolicyAlgo):
             num_mcmc_steps = self._compute_num_mcmc_steps(
                 no_randomness=False
             )
+            grad_norms = []
 
             # Set to true for validation since grad would be off.
             with torch.set_grad_enabled(True):
                 for i in range(num_mcmc_steps):
-                    pred_action = self._energy_step(
+                    pred_action, pred_grad = self._energy_step(
                         trajectory=pred_action,
                         cond_tokens=obs_cond,
                         memory_mask=memory_mask,
-                        num_mcmc_steps=num_mcmc_steps,
-                        i=i,
+                        final_stop=(i >= num_mcmc_steps - 1),
                         inference_mode=False,
                         langevin_dynamics_noise_std=langevin_dynamics_noise_std,
                         predicted_energies_list=predicted_energies_list,
                         predicted_traj_list=predicted_traj_list,
                     )
+                    pred_grad_norm = pred_grad.norm(dim=(-1, -2))
+                    grad_norms.append(pred_grad_norm)
 
             loss_info, loss = compute_loss(
                 action,
@@ -258,16 +261,15 @@ class EBTPolicy(PolicyAlgo):
         trajectory: torch.Tensor,
         cond_tokens: torch.Tensor,
         memory_mask: torch.Tensor,
-        num_mcmc_steps: int,
-        i: int,
         inference_mode: bool,
+        final_stop: bool,
         langevin_dynamics_noise_std: Optional[torch.Tensor] = None,
         predicted_energies_list: Optional[List[torch.Tensor]] = None,
         predicted_traj_list: Optional[List[torch.Tensor]] = None
     ):
         B = trajectory.shape[0]
         trajectory = trajectory.detach().requires_grad_()
-        if i < num_mcmc_steps - 1:
+        if final_stop:
             trajectory = self.ebl_norm(trajectory)
 
         if not inference_mode and self.langevin_dynamics_noise_std != 0:
@@ -293,8 +295,7 @@ class EBTPolicy(PolicyAlgo):
         predicted_traj_grad = self._compute_grad(
             energy_pred=energy_pred,
             trajectory=trajectory,
-            step_no=i,
-            num_mcmc_steps=num_mcmc_steps,
+            final_stop=final_stop,
             create_graph=(not inference_mode)
         )
 
@@ -304,7 +305,7 @@ class EBTPolicy(PolicyAlgo):
             predicted_energies_list.append(energy_pred)
             predicted_traj_list.append(trajectory)
 
-        return trajectory
+        return trajectory, predicted_traj_grad
 
     def log_info(self, info):
         """
@@ -406,21 +407,30 @@ class EBTPolicy(PolicyAlgo):
             action_tokens=action_pred,
             cross_attention=True
         )
-        num_mcmc_steps = self._compute_num_mcmc_steps(
-            no_randomness=True
-        )
-
         # Set to true for validation since grad would be off.
         with torch.set_grad_enabled(True):
-            for i in range(num_mcmc_steps):
-                action_pred = self._energy_step(
+            i = 0
+            grad_pred_norm = float("inf")
+            grad_norms = []
+            while i < self.max_mcmc_steps - 1 and grad_pred_norm > self.min_grad:
+                action_pred, grad_pred = self._energy_step(
                     trajectory=action_pred,
                     cond_tokens=obs_cond,
                     memory_mask=memory_mask,
-                    num_mcmc_steps=num_mcmc_steps,
-                    i=i,
-                    inference_mode=True
+                    inference_mode=True,
+                    final_stop=False
                 )
+                grad_pred_norm = grad_pred.norm().detach().item()
+                grad_norms.append(grad_pred_norm)
+                i += 1
+            action_pred, _ = self._energy_step(
+                trajectory=action_pred,
+                cond_tokens=obs_cond,
+                memory_mask=memory_mask,
+                final_stop=True,
+                inference_mode=True
+            )
+        print("num steps:", i+1)
 
         start = To - 1
         end = start + Ta
@@ -460,11 +470,10 @@ class EBTPolicy(PolicyAlgo):
         self,
         energy_pred: torch.Tensor,
         trajectory: torch.Tensor,
-        step_no: int,
-        num_mcmc_steps: int,
+        final_stop: bool,
         create_graph
     ):
-        if self.truncate_mcmc and step_no == num_mcmc_steps - 1:
+        if self.truncate_mcmc and final_stop:
             predicted_traj_grad = torch.autograd.grad(
                 outputs=energy_pred.sum(),
                 retain_graph=True,

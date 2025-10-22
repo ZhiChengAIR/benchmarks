@@ -73,3 +73,5 @@ class EBTPolicyConfig(BaseConfig):
         self.algo.ebt.mcmc_step_size_learnable = False
         self.algo.ebt.langevin_dynamics_noise_std = 0.05
         self.algo.ebt.truncate_mcmc = False
+        self.algo.ebt.min_grad = 0.002
+        self.algo.ebt.max_mcmc_steps = 20
