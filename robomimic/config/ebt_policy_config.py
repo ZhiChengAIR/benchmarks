@@ -75,3 +75,4 @@ class EBTPolicyConfig(BaseConfig):
         self.algo.ebt.truncate_mcmc = False
         self.algo.ebt.min_grad = 0.002
         self.algo.ebt.max_mcmc_steps = 20
+        self.algo.ebt.mu = 0.9

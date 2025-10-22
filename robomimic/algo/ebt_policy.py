@@ -121,6 +121,7 @@ class EBTPolicy(PolicyAlgo):
         self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
         self.max_mcmc_steps = self.algo_config.ebt.max_mcmc_steps
         self.min_grad = self.algo_config.ebt.min_grad
+        self.mu = self.algo_config.ebt.mu
 
     def process_batch_for_training(self, batch):
         """
@@ -261,11 +262,10 @@ class EBTPolicy(PolicyAlgo):
         velocity: torch.Tensor,
         forward: bool
     ):
-        with torch.no_grad():
-            if forward:
-                action = action + velocity * self.mu
-            else:
-                action = action - velocity * self.mu
+        if forward:
+            action = action + velocity * self.mu
+        else:
+            action = action - velocity * self.mu
         return action
 
     def _nesterov_step(
@@ -275,10 +275,10 @@ class EBTPolicy(PolicyAlgo):
         velocity: torch.Tensor,
         alpha: torch.Tensor
     ):
-        velocity.mul_(self.mu).add_(-alpha, grad)
+        velocity.mul_(self.mu).add_(-alpha * grad)
         action = action + velocity
 
-        return velocity
+        return action
 
     def _energy_step(
         self,
@@ -297,12 +297,6 @@ class EBTPolicy(PolicyAlgo):
         if not final_stop:
             trajectory = self.ebl_norm(trajectory)
 
-        trajectory = self._perform_lookahead(
-            action=trajectory,
-            velocity=velocity,
-            forward=True
-        )
-
         if not inference_mode and self.langevin_dynamics_noise_std != 0:
             ld_noise = torch.randn_like(
                 trajectory,
@@ -310,17 +304,18 @@ class EBTPolicy(PolicyAlgo):
             ) * langevin_dynamics_noise_std
             trajectory = trajectory + ld_noise
 
+        traj_look = self._perform_lookahead(
+            action=trajectory,
+            velocity=velocity,
+            forward=True
+        )
+
         energy_pred = self.nets["policy"]["energy_pred_net"](
-            sample=trajectory,
+            sample=traj_look,
             cond=cond_tokens,
             memory_mask=memory_mask
         )
 
-        trajectory = self._perform_lookahead(
-            action=trajectory,
-            velocity=velocity,
-            forward=False
-        )
         energy_pred = energy_pred.mean(dim=(-1, -2))
 
         alpha = self._compute_alpha(
