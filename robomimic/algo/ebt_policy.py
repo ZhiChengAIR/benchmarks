@@ -326,7 +326,7 @@ class EBTPolicy(PolicyAlgo):
 
         predicted_traj_grad = self._compute_grad(
             energy_pred=energy_pred,
-            trajectory=trajectory,
+            trajectory=traj_look,
             final_stop=final_stop,
             create_graph=(not inference_mode)
         )
