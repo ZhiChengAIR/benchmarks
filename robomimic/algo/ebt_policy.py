@@ -194,6 +194,7 @@ class EBTPolicy(PolicyAlgo):
 
             # sample noise to add to actions
             pred_action = torch.randn(action.shape, device=self.device)
+            velocity = torch.zeros_like(pred_action)
 
             memory_mask = TokUtils.generate_attention_mask(
                 obs_tokens=obs_cond,
@@ -210,7 +211,6 @@ class EBTPolicy(PolicyAlgo):
             num_mcmc_steps = self._compute_num_mcmc_steps(
                 no_randomness=False
             )
-            grad_norms = []
 
             # Set to true for validation since grad would be off.
             with torch.set_grad_enabled(True):
@@ -219,14 +219,13 @@ class EBTPolicy(PolicyAlgo):
                         trajectory=pred_action,
                         cond_tokens=obs_cond,
                         memory_mask=memory_mask,
+                        velocity=velocity,
                         final_stop=(i >= num_mcmc_steps - 1),
                         inference_mode=False,
                         langevin_dynamics_noise_std=langevin_dynamics_noise_std,
                         predicted_energies_list=predicted_energies_list,
                         predicted_traj_list=predicted_traj_list,
                     )
-                    pred_grad_norm = pred_grad.norm(dim=(-1, -2))
-                    grad_norms.append(pred_grad_norm)
 
             loss_info, loss = compute_loss(
                 action,
@@ -256,21 +255,53 @@ class EBTPolicy(PolicyAlgo):
 
         return info
 
+    def _perform_lookahead(
+        self,
+        action: torch.Tensor,
+        velocity: torch.Tensor,
+        forward: bool
+    ):
+        with torch.no_grad():
+            if forward:
+                action = action + velocity * self.mu
+            else:
+                action = action - velocity * self.mu
+        return action
+
+    def _nesterov_step(
+        self,
+        action: torch.Tensor,
+        grad: torch.Tensor,
+        velocity: torch.Tensor,
+        alpha: torch.Tensor
+    ):
+        velocity.mul_(self.mu).add_(-alpha, grad)
+        action = action + velocity
+
+        return velocity
+
     def _energy_step(
         self,
         trajectory: torch.Tensor,
         cond_tokens: torch.Tensor,
         memory_mask: torch.Tensor,
+        velocity: torch.Tensor,
         inference_mode: bool,
         final_stop: bool,
         langevin_dynamics_noise_std: Optional[torch.Tensor] = None,
         predicted_energies_list: Optional[List[torch.Tensor]] = None,
-        predicted_traj_list: Optional[List[torch.Tensor]] = None
+        predicted_traj_list: Optional[List[torch.Tensor]] = None,
     ):
         B = trajectory.shape[0]
         trajectory = trajectory.detach().requires_grad_()
-        if final_stop:
+        if not final_stop:
             trajectory = self.ebl_norm(trajectory)
+
+        trajectory = self._perform_lookahead(
+            action=trajectory,
+            velocity=velocity,
+            forward=True
+        )
 
         if not inference_mode and self.langevin_dynamics_noise_std != 0:
             ld_noise = torch.randn_like(
@@ -283,6 +314,12 @@ class EBTPolicy(PolicyAlgo):
             sample=trajectory,
             cond=cond_tokens,
             memory_mask=memory_mask
+        )
+
+        trajectory = self._perform_lookahead(
+            action=trajectory,
+            velocity=velocity,
+            forward=False
         )
         energy_pred = energy_pred.mean(dim=(-1, -2))
 
@@ -299,7 +336,12 @@ class EBTPolicy(PolicyAlgo):
             create_graph=(not inference_mode)
         )
 
-        trajectory = trajectory - alpha * predicted_traj_grad
+        trajectory = self._nesterov_step(
+            action=trajectory,
+            velocity=velocity,
+            grad=predicted_traj_grad,
+            alpha=alpha
+        )
 
         if not inference_mode:
             predicted_energies_list.append(energy_pred)
@@ -400,6 +442,7 @@ class EBTPolicy(PolicyAlgo):
         # initialize action from Guassian noise
         action_pred = torch.randn(
             (B, Tp, action_dim), device=self.device)
+        velocity = torch.zeros_like(action_pred)
 
         memory_mask = TokUtils.generate_attention_mask(
             obs_tokens=obs_cond,
@@ -415,6 +458,7 @@ class EBTPolicy(PolicyAlgo):
             while i < self.max_mcmc_steps - 1 and grad_pred_norm > self.min_grad:
                 action_pred, grad_pred = self._energy_step(
                     trajectory=action_pred,
+                    velocity=velocity,
                     cond_tokens=obs_cond,
                     memory_mask=memory_mask,
                     inference_mode=True,
