@@ -260,13 +260,8 @@ class EBTPolicy(PolicyAlgo):
         self,
         action: torch.Tensor,
         velocity: torch.Tensor,
-        forward: bool
     ):
-        if forward:
-            action = action + velocity * self.mu
-        else:
-            action = action - velocity * self.mu
-        return action
+        return action + velocity * self.mu
 
     def _nesterov_step(
         self,
@@ -306,8 +301,7 @@ class EBTPolicy(PolicyAlgo):
 
         traj_look = self._perform_lookahead(
             action=trajectory,
-            velocity=velocity,
-            forward=True
+            velocity=velocity
         )
 
         energy_pred = self.nets["policy"]["energy_pred_net"](
