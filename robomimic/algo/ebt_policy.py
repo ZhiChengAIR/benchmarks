@@ -123,8 +123,8 @@ class EBTPolicy(PolicyAlgo):
         self.min_grad = self.algo_config.ebt.min_grad
         self.mu = self.algo_config.ebt.mu
         self.langevin_dynamics_scheduler = LangevinDynamicsCosineAnnealingScheduler(
-            min_sigma=self.min_sigma,
-            max_sigma=self.max_sigma,
+            min_sigma=self.algo_config.ebt.min_sigma,
+            max_sigma=self.algo_config.ebt.max_sigma
         )
 
     def process_batch_for_training(self, batch):
@@ -293,7 +293,7 @@ class EBTPolicy(PolicyAlgo):
             trajectory = self.ebl_norm(trajectory)
 
         if not inference_mode and num_mcmc_steps is not None:
-            trajectory = self.langevin_dynamics_scheduler(
+            trajectory = self.langevin_dynamics_scheduler.apply_noise(
                 mcmc_step=mcmc_step,
                 num_mcmc_steps=num_mcmc_steps,
                 action=trajectory

@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../color_jitter_square",
+        "output_dir": "../ld_anneal_square",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 4,
         "hdf5_cache_mode": "low_dim",

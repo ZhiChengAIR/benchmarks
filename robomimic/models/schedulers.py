@@ -16,7 +16,6 @@ class LangevinDynamicsCosineAnnealingScheduler:
         self,
         mcmc_step: int,
         num_mcmc_steps: int,
-        device: torch.device
     ) -> float:
         """Retrieve the current sigma for Langevin Dynamics"""
         return (
