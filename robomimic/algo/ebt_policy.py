@@ -298,8 +298,6 @@ class EBTPolicy(PolicyAlgo):
                 num_mcmc_steps=num_mcmc_steps,
                 action=trajectory
             )
-        elif num_mcmc_steps is None:
-            raise RuntimeError("No num_mcmc_steps was provided for the langevin dynamics scheduler")
 
         traj_look = self._perform_lookahead(
             action=trajectory,
