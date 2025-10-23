@@ -212,7 +212,7 @@ class EBTPolicy(PolicyAlgo):
             num_mcmc_steps = self._compute_num_mcmc_steps(
                 no_randomness=False
             )
-
+            grad_norms = []
             # Set to true for validation since grad would be off.
             with torch.set_grad_enabled(True):
                 for i in range(num_mcmc_steps):
@@ -227,6 +227,8 @@ class EBTPolicy(PolicyAlgo):
                         predicted_energies_list=predicted_energies_list,
                         predicted_traj_list=predicted_traj_list,
                     )
+                    pred_grad_norm = pred_grad.norm(dim=(-1, -2)).mean()
+                    grad_norms.append(pred_grad_norm)
 
             loss_info, loss = compute_loss(
                 action,

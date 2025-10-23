@@ -39,9 +39,9 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../ebt_policy_trained_models",
+        "output_dir": "../color_jitter_square",
         "normalize_weights_by_ds_size": false,
-        "num_data_workers": 0,
+        "num_data_workers": 4,
         "hdf5_cache_mode": "low_dim",
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
@@ -109,12 +109,12 @@
         "ebt": {
             "mu": 0.9,
             "max_mcmc_steps": 20,
-            "min_grad": 0.002,
+            "min_grad": 0.0002,
             "randomize_mcmc_step_size_scale": 1.5,
             "scale_alpha_with_energy_temp": 1,
             "randomize_mcmc_num_steps": 3,
             "mcmc_num_steps": 6,
-            "mcmc_step_size": 100,
+            "mcmc_step_size": 1000,
             "clamp_future_grads": false,
             "clamp_futures_grad_max_change": 9.0,
             "mcmc_step_size_learnable": false,
@@ -154,13 +154,20 @@
                 "core_kwargs": {
                     "dropout": 0.0
                 },
-                "obs_randomizer_class": ["CropRandomizer"],
+                "obs_randomizer_class": ["CropRandomizer", "ColorRandomizer"],
                 "obs_randomizer_kwargs": [
                     {
                         "crop_shape": 76,
                         "crop_height": 76,
                         "num_crops": 1,
                         "pos_enc": false
+                    },
+                    {
+                        "brightness": 0.3,
+                        "contrast": 0.3,
+                        "saturation": 0.3,
+                        "hue": 0.3,
+                        "num_samples": 1
                     }
                 ]
             },
