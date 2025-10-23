@@ -110,3 +110,6 @@ def depth_to_rgb(depth_map, depth_min=None, depth_max=None):
         depth_map = depth_map[..., 0]
     assert len(depth_map.shape) == 2 # [H, W]
     return (255. * cm.hot(depth_map, 3)).astype(np.uint8)[..., :3]
+
+
+
