@@ -71,7 +71,8 @@ class EBTPolicyConfig(BaseConfig):
         self.algo.ebt.clamp_future_grads = False
         self.algo.ebt.clamp_futures_grad_max_change = 9.0
         self.algo.ebt.mcmc_step_size_learnable = False
-        self.algo.ebt.langevin_dynamics_noise_std = 0.05
+        self.algo.ebt.max_sigma = 0.3
+        self.algo.ebt.min_sigma = 0.001
         self.algo.ebt.truncate_mcmc = False
         self.algo.ebt.min_grad = 0.002
         self.algo.ebt.max_mcmc_steps = 20

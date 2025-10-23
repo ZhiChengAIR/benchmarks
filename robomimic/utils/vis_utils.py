@@ -2,9 +2,12 @@
 This file contains utility functions for visualizing image observations in the training pipeline.
 These functions can be a useful debugging tool.
 """
-import numpy as np
-import matplotlib.pyplot as plt
 import os
+from typing import List
+
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 import robomimic.utils.tensor_utils as TensorUtils
@@ -110,3 +113,29 @@ def depth_to_rgb(depth_map, depth_min=None, depth_max=None):
         depth_map = depth_map[..., 0]
     assert len(depth_map.shape) == 2 # [H, W]
     return (255. * cm.hot(depth_map, 3)).astype(np.uint8)[..., :3]
+
+
+def store_ebt_outputs(
+    pred_traj_list: List[torch.Tensor],
+    pred_energy_list: List[torch.Tensor],
+    out_path: str = "ebt_outputs.pt",
+):
+    """
+    Save EBT outputs to a single .pt file.
+
+    Notes:
+      - detaches tensors from autograd graph
+      - moves to CPU (so it can be loaded without a GPU)
+    """
+    data = {
+        "pred_traj_list": [t.detach().cpu() for t in pred_traj_list],
+        "pred_energy_list": [e.detach().cpu() for e in pred_energy_list],
+        "meta": {
+            "format": "torch_save_v1",
+            "num_traj": len(pred_traj_list),
+            "num_energy": len(pred_energy_list),
+        },
+    }
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    torch.save(data, out_path)
+    print(f"Saved {len(pred_traj_list)} traj and {len(pred_energy_list)} energy tensors -> {out_path}")
