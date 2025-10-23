@@ -17,6 +17,7 @@ import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.token_utils as TokUtils
+from robomimic.models.schedulers import LangevinDynamicsCosineAnnealingScheduler
 
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
@@ -116,12 +117,15 @@ class EBTPolicy(PolicyAlgo):
         self.clamp_futures_grad_max_change = self.algo_config.ebt.clamp_futures_grad_max_change
         self.mcmc_num_steps = self.algo_config.ebt.mcmc_num_steps
         self.truncate_mcmc = self.algo_config.ebt.truncate_mcmc
-        self.langevin_dynamics_noise_std = torch.tensor(self.algo_config.ebt.langevin_dynamics_noise_std)
         self.ebl_norm = RMSNorm(self.ac_dim)
         self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
         self.max_mcmc_steps = self.algo_config.ebt.max_mcmc_steps
         self.min_grad = self.algo_config.ebt.min_grad
         self.mu = self.algo_config.ebt.mu
+        self.langevin_dynamics_scheduler = LangevinDynamicsCosineAnnealingScheduler(
+            min_sigma=self.min_sigma,
+            max_sigma=self.max_sigma,
+        )
 
     def process_batch_for_training(self, batch):
         """
@@ -206,29 +210,24 @@ class EBTPolicy(PolicyAlgo):
 
             predicted_traj_list = []
             predicted_energies_list = []
-            langevin_dynamics_noise_std = torch.clamp(
-                self.langevin_dynamics_noise_std, min=0.000001
-            )
             num_mcmc_steps = self._compute_num_mcmc_steps(
                 no_randomness=False
             )
-            grad_norms = []
             # Set to true for validation since grad would be off.
             with torch.set_grad_enabled(True):
                 for i in range(num_mcmc_steps):
-                    pred_action, pred_grad = self._energy_step(
+                    pred_action, pred_grad, pred_energy = self._energy_step(
                         trajectory=pred_action,
                         cond_tokens=obs_cond,
                         memory_mask=memory_mask,
                         velocity=velocity,
                         final_stop=(i >= num_mcmc_steps - 1),
                         inference_mode=False,
-                        langevin_dynamics_noise_std=langevin_dynamics_noise_std,
-                        predicted_energies_list=predicted_energies_list,
-                        predicted_traj_list=predicted_traj_list,
+                        mcmc_step=i,
+                        num_mcmc_steps=num_mcmc_steps
                     )
-                    pred_grad_norm = pred_grad.norm(dim=(-1, -2)).mean()
-                    grad_norms.append(pred_grad_norm)
+                    predicted_traj_list.append(pred_action)
+                    predicted_energies_list.append(pred_energy)
 
             loss_info, loss = compute_loss(
                 action,
@@ -285,21 +284,22 @@ class EBTPolicy(PolicyAlgo):
         velocity: torch.Tensor,
         inference_mode: bool,
         final_stop: bool,
-        langevin_dynamics_noise_std: Optional[torch.Tensor] = None,
-        predicted_energies_list: Optional[List[torch.Tensor]] = None,
-        predicted_traj_list: Optional[List[torch.Tensor]] = None,
+        mcmc_step: int,
+        num_mcmc_steps: Optional[int] = None
     ):
         B = trajectory.shape[0]
         trajectory = trajectory.detach().requires_grad_()
         if not final_stop:
             trajectory = self.ebl_norm(trajectory)
 
-        if not inference_mode and self.langevin_dynamics_noise_std != 0:
-            ld_noise = torch.randn_like(
-                trajectory,
-                device=trajectory.device,
-            ) * langevin_dynamics_noise_std
-            trajectory = trajectory + ld_noise
+        if not inference_mode and num_mcmc_steps is not None:
+            trajectory = self.langevin_dynamics_scheduler(
+                mcmc_step=mcmc_step,
+                num_mcmc_steps=num_mcmc_steps,
+                action=trajectory
+            )
+        elif num_mcmc_steps is None:
+            raise RuntimeError("No num_mcmc_steps was provided for the langevin dynamics scheduler")
 
         traj_look = self._perform_lookahead(
             action=trajectory,
@@ -334,11 +334,7 @@ class EBTPolicy(PolicyAlgo):
             alpha=alpha
         )
 
-        if not inference_mode:
-            predicted_energies_list.append(energy_pred)
-            predicted_traj_list.append(trajectory)
-
-        return trajectory, predicted_traj_grad
+        return trajectory, predicted_traj_grad, energy_pred
 
     def log_info(self, info):
         """
@@ -447,24 +443,26 @@ class EBTPolicy(PolicyAlgo):
             grad_pred_norm = float("inf")
             grad_norms = []
             while i < self.max_mcmc_steps - 1 and grad_pred_norm > self.min_grad:
-                action_pred, grad_pred = self._energy_step(
+                action_pred, grad_pred, _ = self._energy_step(
                     trajectory=action_pred,
                     velocity=velocity,
                     cond_tokens=obs_cond,
                     memory_mask=memory_mask,
                     inference_mode=True,
-                    final_stop=False
+                    final_stop=False,
+                    mcmc_step=i
                 )
                 grad_pred_norm = grad_pred.norm().detach().item()
                 grad_norms.append(grad_pred_norm)
                 i += 1
-            action_pred, _ = self._energy_step(
+            action_pred, _, _ = self._energy_step(
                 trajectory=action_pred,
                 velocity=velocity,
                 cond_tokens=obs_cond,
                 memory_mask=memory_mask,
                 final_stop=True,
-                inference_mode=True
+                inference_mode=True,
+                mcmc_step=i
             )
         print("num steps:", i+1)
 
