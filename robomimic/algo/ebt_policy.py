@@ -296,8 +296,7 @@ class EBTPolicy(PolicyAlgo):
     ):
         B = trajectory.shape[0]
         trajectory = trajectory.detach().requires_grad_()
-        if not final_stop:
-            trajectory = self.ebl_norm(trajectory)
+        trajectory = self.ebl_norm(trajectory)
 
         if not inference_mode and num_mcmc_steps is not None:
             trajectory = self.langevin_dynamics_scheduler.apply_noise(

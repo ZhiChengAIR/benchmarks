@@ -30,7 +30,7 @@
             "enabled": true,
             "n": 50,
             "horizon": 700,
-            "rate": 50,
+            "rate": 10,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../diffusion_policy_trained_models",
+        "output_dir": "../diffusion_policy_can",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
@@ -122,7 +122,7 @@
         "ddpm": {
             "enabled": true,
             "num_train_timesteps": 100,
-            "num_inference_timesteps": 100,
+            "num_inference_timesteps": 50,
             "beta_schedule": "squaredcos_cap_v2",
             "clip_sample": true,
             "prediction_type": "epsilon"
@@ -147,7 +147,7 @@
                     "robot0_gripper_qpos",
                     "object"
                 ],
-                "rgb": ["sideview_image", "robot0_eye_in_hand_image"],
+                "rgb": ["agentview_image", "robot0_eye_in_hand_image"],
                 "depth": [],
                 "scan": []
             },
@@ -168,8 +168,22 @@
             "rgb": {
                 "core_class": "VisualCore",
                 "core_kwargs": {},
-                "obs_randomizer_class": null,
-                "obs_randomizer_kwargs": {}
+                "obs_randomizer_class": ["CropRandomizer", "ColorRandomizer"],
+                "obs_randomizer_kwargs": [
+                    {
+                        "crop_shape": 76,
+                        "crop_height": 76,
+                        "num_crops": 1,
+                        "pos_enc": false
+                    },
+                    {
+                        "brightness": 0.3,
+                        "contrast": 0.3,
+                        "saturation": 0.3,
+                        "hue": 0.3,
+                        "num_samples": 1
+                    }
+                ]
             },
             "depth": {
                 "core_class": "VisualCore",

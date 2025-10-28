@@ -563,9 +563,6 @@ class DiffusionPolicyTransformer(PolicyAlgo):
 
             obs_features = TensorUtils.time_distributed(inputs, self.nets["policy"]["obs_encoder"], inputs_as_kwargs=True)
             assert obs_features.ndim == 3  # [B, T, D]
-            obs_cond = self.nets["policy"]["obs_temporal_encoder"](
-                obs_features
-            )
 
             # sample noise to add to actions
             noise = torch.randn(actions.shape, device=self.device)
@@ -581,9 +578,13 @@ class DiffusionPolicyTransformer(PolicyAlgo):
             noisy_actions = self.noise_scheduler.add_noise(
                 actions, noise, timesteps)
 
+            obs_cond = self.nets["policy"]["obs_temporal_encoder"](
+                obs_features, timesteps
+            )
+
             # predict the noise residual
             noise_pred = self.nets["policy"]["noise_pred_net"](
-                noisy_actions, timesteps, obs_cond)
+                noisy_actions, obs_cond)
 
             # L2 loss
             loss = F.mse_loss(noise_pred, noise)
@@ -706,7 +707,6 @@ class DiffusionPolicyTransformer(PolicyAlgo):
         assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]
 
-        obs_cond = self.nets["policy"]["obs_temporal_encoder"](obs_features)
         # initialize action from Guassian noise
         action = torch.randn(
             (B, Tp, action_dim), device=self.device)
@@ -716,9 +716,11 @@ class DiffusionPolicyTransformer(PolicyAlgo):
 
         for k in self.noise_scheduler.timesteps:
             # predict noise
+            obs_cond = self.nets["policy"]["obs_temporal_encoder"](
+                obs_features, k
+            )
             noise_pred = nets["policy"]["noise_pred_net"](
                 sample=action,
-                timestep=k,
                 cond=obs_cond
             )
 
