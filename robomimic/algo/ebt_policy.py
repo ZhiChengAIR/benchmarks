@@ -18,7 +18,6 @@ import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.utils.token_utils as TokUtils
 from robomimic.models.schedulers import LangevinDynamicsCosineAnnealingScheduler
-from robomimic.utils.vis_utils import store_ebt_outputs
 
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
@@ -230,11 +229,6 @@ class EBTPolicy(PolicyAlgo):
                     pred_grad_norm = pred_grad.norm(dim=(-1, -2)).mean()
                     predicted_traj_list.append(pred_action)
                     predicted_energies_list.append(pred_energy)
-
-#            store_ebt_outputs(
-#                predicted_traj_list,
-#                predicted_energies_list
-#            )
 
             loss_info, loss = compute_loss(
                 action,

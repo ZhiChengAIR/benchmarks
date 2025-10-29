@@ -30,7 +30,7 @@
             "enabled": true,
             "n": 50,
             "horizon": 700,
-            "rate": 10,
+            "rate": 50,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../diffusion_policy_can",
+        "output_dir": "../diffusion_policy_square",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 0,
         "hdf5_cache_mode": "low_dim",
@@ -122,7 +122,7 @@
         "ddpm": {
             "enabled": true,
             "num_train_timesteps": 100,
-            "num_inference_timesteps": 50,
+            "num_inference_timesteps": 100,
             "beta_schedule": "squaredcos_cap_v2",
             "clip_sample": true,
             "prediction_type": "epsilon"
