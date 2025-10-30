@@ -446,7 +446,7 @@ class EBTPolicy(PolicyAlgo):
             grad_pred_norm = float("inf")
             grad_norms = []
             while i < self.max_mcmc_steps - 1 and grad_pred_norm > self.min_grad:
-                action_pred, grad_pred, _ = self._energy_step(
+                action_pred, grad_pred, energy_pred = self._energy_step(
                     trajectory=action_pred,
                     velocity=velocity,
                     cond_tokens=obs_cond,
