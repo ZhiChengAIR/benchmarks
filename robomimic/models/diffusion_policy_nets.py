@@ -276,6 +276,7 @@ class ObsTemporalEncoder(nn.Module):
         # input embedding stem
         self.input_emb = nn.Linear(input_dim, embed_dim)
         self.input_pos_emb = nn.Parameter(torch.zeros(1, n_obs_steps, embed_dim))
+        self.time_emb = SinusoidalPosEmb(embed_dim)
 
         self.encoder = SpatioTemporalEncoder(
             dim=embed_dim,
@@ -286,8 +287,8 @@ class ObsTemporalEncoder(nn.Module):
             proj_drop=proj_dropout,
             n_obs_steps=n_obs_steps
         )
-        mask = torch.tril(torch.ones(n_obs_steps, n_obs_steps)).view(
-            1, 1, n_obs_steps, n_obs_steps
+        mask = torch.tril(torch.ones(n_obs_steps+1, n_obs_steps+1)).view(
+            1, 1, n_obs_steps+1, n_obs_steps+1
         )
         self.register_buffer("mask", mask)
 
@@ -298,6 +299,7 @@ class ObsTemporalEncoder(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        timestep: Union[int, torch.Tensor]
     ):
         """
         x: (B,T,input_dim)
@@ -305,7 +307,17 @@ class ObsTemporalEncoder(nn.Module):
         global_cond: (B,global_cond_dim)
         output: (B,T,input_dim)
         """
+        timesteps = timestep
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=x.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(x.device)
+        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+        timesteps = timesteps.expand(x.shape[0])
+        t = self.time_emb(timesteps)[:, None]
         x = self.input_emb(x) + self.input_pos_emb
+        x = torch.cat([t, x], dim=-2)
+
         x = self.encoder(x, self.mask)
 
         return x
@@ -340,7 +352,6 @@ class DiffusionTransformer(nn.Module):
         # input embedding stem
         self.input_emb = nn.Linear(input_dim, embed_dim)
         self.input_pos_emb = nn.Parameter(torch.zeros(1, horizon, embed_dim))
-        self.time_emb = SinusoidalPosEmb(embed_dim)
 
         self.decoder = DiT(
             dim=embed_dim,
@@ -350,8 +361,8 @@ class DiffusionTransformer(nn.Module):
             attn_drop=attn_dropout,
             proj_drop=proj_dropout
         )
-        mask = torch.tril(torch.ones(horizon, n_obs_steps)).view(
-            1, 1, horizon, n_obs_steps
+        mask = torch.tril(torch.ones(horizon, n_obs_steps+1)).view(
+            1, 1, horizon, n_obs_steps+1
         )
         self.register_buffer("mask", mask)
 
@@ -362,7 +373,6 @@ class DiffusionTransformer(nn.Module):
     def forward(
         self,
         sample: torch.Tensor,
-        timestep: Union[torch.Tensor, float, int],
         cond: torch.Tensor
     ):
         """
@@ -374,18 +384,9 @@ class DiffusionTransformer(nn.Module):
         # (B,C,T)
 
         # 1. time
-        timesteps = timestep
-        if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
-        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
-            timesteps = timesteps[None].to(sample.device)
-        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-        timesteps = timesteps.expand(sample.shape[0])
 
         x = self.input_emb(sample) + self.input_pos_emb
-        t = self.time_emb(timesteps)[:, None]
-        c = cond
-        x = self.decoder(x=x, c=c, t=t, mask=None, memory_mask=self.mask)
+        x = self.decoder(x=x, c=cond, mask=None, memory_mask=self.mask)
 
         # (B,T,C)
         return x

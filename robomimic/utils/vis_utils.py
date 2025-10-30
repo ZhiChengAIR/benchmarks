@@ -2,9 +2,14 @@
 This file contains utility functions for visualizing image observations in the training pipeline.
 These functions can be a useful debugging tool.
 """
-import numpy as np
-import matplotlib.pyplot as plt
 import os
+from typing import List
+import re
+from pathlib import Path
+
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 import robomimic.utils.tensor_utils as TensorUtils
@@ -110,3 +115,64 @@ def depth_to_rgb(depth_map, depth_min=None, depth_max=None):
         depth_map = depth_map[..., 0]
     assert len(depth_map.shape) == 2 # [H, W]
     return (255. * cm.hot(depth_map, 3)).astype(np.uint8)[..., :3]
+
+
+def store_ebt_outputs(
+    pred_traj_list: List[torch.Tensor],
+    pred_energy_list: List[torch.Tensor],
+    out_path: str = "ebt_outputs.pt",
+):
+    """
+    Save EBT outputs to a single .pt file.
+
+    Notes:
+      - detaches tensors from autograd graph
+      - moves to CPU (so it can be loaded without a GPU)
+    """
+    data = {
+        "pred_traj_list": [t.detach().cpu() for t in pred_traj_list],
+        "pred_energy_list": [e.detach().cpu() for e in pred_energy_list],
+        "meta": {
+            "format": "torch_save_v1",
+            "num_traj": len(pred_traj_list),
+            "num_energy": len(pred_energy_list),
+        },
+    }
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    torch.save(data, out_path)
+    print(f"Saved {len(pred_traj_list)} traj and {len(pred_energy_list)} energy tensors -> {out_path}")
+
+
+def store_rollout_energy(
+    pred_energy_list: List[torch.Tensor],
+    rate: int = 50,
+    num_episode: int = 50
+):
+    outdir = "saved_energies"
+    out_path = Path(outdir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    # Only count files that match the expected pattern
+    pattern = re.compile(r"pred_energies_epoch_(\d+)_episode_(\d+)\.pt$")
+    existing = [p for p in out_path.iterdir() if p.is_file() and pattern.match(p.name)]
+    total_existing = len(existing)
+
+    # Derive current rollout index and starting episode offset
+    rollout_index = total_existing // num_episode
+    episode_start = total_existing % num_episode
+    epoch = rollout_index * rate
+
+    # Save incoming tensors, rolling episode number and epoch as needed
+    ep = episode_start
+    cur_epoch = epoch
+    for t in pred_energy_list:
+        # If we've filled a rollout, advance to next epoch block
+        if ep >= num_episode:
+            rollout_index += 1
+            cur_epoch = rollout_index * rate
+            ep = 0
+
+        fname = out_path / f"pred_energies_epoch_{cur_epoch}_episode_{ep}.pt"
+        torch.save(t.detach().cpu(), fname)
+
+        ep += 1
