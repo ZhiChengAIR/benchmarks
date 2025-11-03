@@ -45,10 +45,10 @@ pip install -e .
 ## Reproducing Robomimic Benchmarks
 For downloading the robomimic datasets, please visit the [documentation](https://robomimic.github.io/docs/introduction/getting_started.html).
 
-To train policies on a robomimic dataset, you can run the below command. Configurations can be altered [here](https://github.com/ZhiChengAIR/benchmarks/blob/master/robomimic/exps/templates/ebt_policy.json).
+To train policies on a robomimic dataset, you can run the below command. Configurations can be altered [here](https://github.com/ZhiChengAIR/benchmarks/blob/master/robomimic/exps/templates/precious_policy.json).
 
 ```
-python robomimic/scripts/train.py --config robomimic/exps/templates/ebt_policy.json --dataset /home/yiqihuang/Projects/robomimic/datasets/tool_hang/ph/image_v15.hdf5
+python robomimic/scripts/train.py --config robomimic/exps/templates/precious_policy.json --dataset /path/to/dataset.hdf5
 ```
 
 ## Docker
