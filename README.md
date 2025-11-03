@@ -6,7 +6,6 @@
   <img width="24.0%" src="docs/images/task_tool_hang.gif">
   <img width="24.0%" src="docs/images/task_square.gif">
   <img width="24.0%" src="docs/images/task_transport.gif">
-  <img width="24.0%" src="docs/images/pusht.gif">
  </p>
 
 ## Introduction
