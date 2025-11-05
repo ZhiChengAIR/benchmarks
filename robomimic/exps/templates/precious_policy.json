@@ -1,5 +1,5 @@
 {
-    "algo_name": "ebt_policy",
+    "algo_name": "precious_policy",
     "experiment": {
         "name": "test",
         "validate": false,
@@ -106,7 +106,7 @@
             "enabled": true,
             "power": 0.75
         },
-        "ebt": {
+        "precious": {
             "mu": 0.9,
             "max_sigma": 0.2,
             "min_sigma": 0.002,

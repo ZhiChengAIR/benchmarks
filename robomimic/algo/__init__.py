@@ -10,4 +10,4 @@ from robomimic.algo.hbc import HBC
 from robomimic.algo.iris import IRIS
 from robomimic.algo.td3_bc import TD3_BC
 from robomimic.algo.diffusion_policy import DiffusionPolicyUNet, DiffusionPolicyTransformer
-from robomimic.algo.ebt_policy import EBTPolicy
+from robomimic.algo.precious_policy import PreciousPolicy

@@ -6,7 +6,7 @@ from robomimic.config.base_config import BaseConfig
 
 
 class PreciousPolicyConfig(BaseConfig):
-    ALGO_NAME = "ebt_policy"
+    ALGO_NAME = "precious_policy"
 
     def train_config(self):
         """
