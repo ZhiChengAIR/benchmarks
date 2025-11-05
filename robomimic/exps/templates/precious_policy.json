@@ -30,7 +30,7 @@
             "enabled": true,
             "n": 50,
             "horizon": 700,
-            "rate": 20,
+            "rate": 200,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -39,7 +39,7 @@
     },
     "train": {
         "data": null,
-        "output_dir": "../traj_norm",
+        "output_dir": "../ebt_tool_hang",
         "normalize_weights_by_ds_size": false,
         "num_data_workers": 2,
         "hdf5_cache_mode": "low_dim",
@@ -77,7 +77,7 @@
             "policy": {
                 "optimizer_type": "adamw",
                 "learning_rate": {
-                    "initial": 0.0001,
+                    "initial": 0.00003,
                     "decay_factor": 0.1,
                     "step_every_batch": true,
                     "scheduler_type": "cosine",
@@ -110,17 +110,17 @@
             "mu": 0.9,
             "max_sigma": 0.2,
             "min_sigma": 0.002,
-            "max_mcmc_steps": 2,
+            "max_mcmc_steps": 20,
             "min_grad": 0.001,
             "randomize_mcmc_step_size_scale": 1.5,
-            "scale_alpha_with_energy_temp": 1,
+            "scale_alpha_with_energy_temp": 9,
             "randomize_mcmc_num_steps": 3,
             "mcmc_num_steps": 6,
             "mcmc_step_size": 1000,
             "clamp_future_grads": false,
             "clamp_futures_grad_max_change": 9.0,
             "mcmc_step_size_learnable": false,
-            "truncate_mcmc": false
+            "truncate_mcmc": true
         }
     },
     "observation": {
@@ -132,7 +132,7 @@
                     "robot0_gripper_qpos",
                     "object"
                 ],
-                "rgb": ["agentview_image", "robot0_eye_in_hand_image"],
+                "rgb": ["sideview_image", "robot0_eye_in_hand_image"],
                 "depth": [],
                 "scan": []
             },

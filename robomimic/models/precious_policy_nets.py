@@ -7,7 +7,7 @@ import torch.nn as nn
 
 import robomimic.models.base_nets as BaseNets
 
-from robomimic.models.transformers import SpatioTemporalEncoder, DiT, EBT
+from robomimic.models.transformers import SpatioTemporalEncoder, DiT, Precious
 from robomimic.models.sincos_pos_emb import (
     get_1d_sincos_pos_embed_from_grid
 )
@@ -89,7 +89,7 @@ class ObsTemporalEncoder(nn.Module):
         return x
 
 
-class EBTTransformer(nn.Module):
+class PreciousTransformer(nn.Module):
     def __init__(
         self,
         input_dim,
@@ -130,7 +130,7 @@ class EBTTransformer(nn.Module):
             normalization=True,
             output_activation=approx_gelu
         )
-        self.decoder = EBT(
+        self.decoder = Precious(
             dim=embed_dim,
             depth=num_layers,
             heads=num_heads,

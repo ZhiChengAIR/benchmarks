@@ -5,7 +5,7 @@ Config for Diffusion Policy algorithm.
 from robomimic.config.base_config import BaseConfig
 
 
-class EBTPolicyConfig(BaseConfig):
+class PreciousPolicyConfig(BaseConfig):
     ALGO_NAME = "ebt_policy"
 
     def train_config(self):
@@ -15,7 +15,7 @@ class EBTPolicyConfig(BaseConfig):
         - don't need "next_obs" from hdf5 - so save on storage and compute by disabling it
         - set compatible data loading parameters
         """
-        super(EBTPolicyConfig, self).train_config()
+        super(PreciousPolicyConfig, self).train_config()
 
         # disable next_obs loading from hdf5
         self.train.hdf5_load_next_obs = False
@@ -63,17 +63,17 @@ class EBTPolicyConfig(BaseConfig):
         self.algo.ema.enabled = True
         self.algo.ema.power = 0.75
 
-        self.algo.ebt.randomize_mcmc_step_size_scale = 1
-        self.algo.ebt.scale_alpha_with_energy_temp = 1
-        self.algo.ebt.randomize_mcmc_num_steps = 3
-        self.algo.ebt.mcmc_num_steps = 3
-        self.algo.ebt.mcmc_step_size = 10000
-        self.algo.ebt.clamp_future_grads = False
-        self.algo.ebt.clamp_futures_grad_max_change = 9.0
-        self.algo.ebt.mcmc_step_size_learnable = False
-        self.algo.ebt.max_sigma = 0.3
-        self.algo.ebt.min_sigma = 0.001
-        self.algo.ebt.truncate_mcmc = False
-        self.algo.ebt.min_grad = 0.002
-        self.algo.ebt.max_mcmc_steps = 20
-        self.algo.ebt.mu = 0.9
+        self.algo.precious.randomize_mcmc_step_size_scale = 1
+        self.algo.precious.scale_alpha_with_energy_temp = 1
+        self.algo.precious.randomize_mcmc_num_steps = 3
+        self.algo.precious.mcmc_num_steps = 3
+        self.algo.precious.mcmc_step_size = 10000
+        self.algo.precious.clamp_future_grads = False
+        self.algo.precious.clamp_futures_grad_max_change = 9.0
+        self.algo.precious.mcmc_step_size_learnable = False
+        self.algo.precious.max_sigma = 0.3
+        self.algo.precious.min_sigma = 0.001
+        self.algo.precious.truncate_mcmc = False
+        self.algo.precious.min_grad = 0.002
+        self.algo.precious.max_mcmc_steps = 20
+        self.algo.precious.mu = 0.9
