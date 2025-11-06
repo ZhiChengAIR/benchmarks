@@ -124,7 +124,9 @@ class PreciousPolicy(PolicyAlgo):
         self.mu = self.algo_config.precious.mu
         self.langevin_dynamics_scheduler = LangevinDynamicsCosineAnnealingScheduler(
             min_sigma=self.algo_config.precious.min_sigma,
-            max_sigma=self.algo_config.precious.max_sigma
+            max_sigma=self.algo_config.precious.max_sigma,
+            inf_sigma=self.algo_config.precious.inf_sigma,
+            add_inf_ld_noise=self.algo_config.precious.add_inf_ld_noise
         )
 
     def process_batch_for_training(self, batch):
@@ -226,7 +228,6 @@ class PreciousPolicy(PolicyAlgo):
                         mcmc_step=i,
                         num_mcmc_steps=num_mcmc_steps
                     )
-                    pred_grad_norm = pred_grad.norm(dim=(-1, -2)).mean()
                     predicted_traj_list.append(pred_action)
                     predicted_energies_list.append(pred_energy)
 
@@ -244,7 +245,7 @@ class PreciousPolicy(PolicyAlgo):
                     net=self.nets,
                     optim=self.optimizers["policy"],
                     loss=loss,
-                    max_grad_norm=1.0
+                    max_grad_norm=1.0,
                 )
 
                 # update Exponential Moving Average of the model weights
@@ -290,18 +291,14 @@ class PreciousPolicy(PolicyAlgo):
     ):
         B = trajectory.shape[0]
         trajectory = trajectory.detach().requires_grad_()
+        velocity = velocity.detach()
         trajectory = self.ebl_norm(trajectory)
 
-        if not inference_mode and num_mcmc_steps is not None:
-            trajectory = self.langevin_dynamics_scheduler.apply_noise(
-                mcmc_step=mcmc_step,
-                num_mcmc_steps=num_mcmc_steps,
-                action=trajectory
-            )
-
-        traj_look = self._perform_lookahead(
+        trajectory = self.langevin_dynamics_scheduler.apply_noise(
+            mcmc_step=mcmc_step,
+            num_mcmc_steps=num_mcmc_steps,
             action=trajectory,
-            velocity=velocity
+            inference_mode=inference_mode
         )
 
         traj_look = self._perform_lookahead(
@@ -513,14 +510,12 @@ class PreciousPolicy(PolicyAlgo):
         if self.truncate_mcmc and final_stop:
             predicted_traj_grad = torch.autograd.grad(
                 outputs=energy_pred.sum(),
-                retain_graph=True,
                 inputs=trajectory,
                 create_graph=create_graph
             )[0]
         elif self.truncate_mcmc:
             predicted_traj_grad = torch.autograd.grad(
                 outputs=energy_pred.sum(),
-                retain_graph=True,
                 inputs=trajectory,
                 create_graph=False
             )[0]

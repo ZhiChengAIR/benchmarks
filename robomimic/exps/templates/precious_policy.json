@@ -30,7 +30,7 @@
             "enabled": true,
             "n": 50,
             "horizon": 700,
-            "rate": 200,
+            "rate": 1,
             "warmstart": 0,
             "terminate_on_success": true
         },
@@ -110,6 +110,8 @@
             "mu": 0.9,
             "max_sigma": 0.2,
             "min_sigma": 0.002,
+            "inf_sigma": 0.1,
+            "add_inf_ld_noise": false,
             "max_mcmc_steps": 20,
             "min_grad": 0.001,
             "randomize_mcmc_step_size_scale": 1.5,

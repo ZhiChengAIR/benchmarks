@@ -77,3 +77,5 @@ class PreciousPolicyConfig(BaseConfig):
         self.algo.precious.min_grad = 0.002
         self.algo.precious.max_mcmc_steps = 20
         self.algo.precious.mu = 0.9
+        self.algo.precious.inf_sigma = 0.1
+        self.algo.precious.add_inf_ld_noise = False
