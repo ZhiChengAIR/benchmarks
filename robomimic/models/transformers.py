@@ -545,7 +545,7 @@ class DiTFinalLayer(nn.Module):
         return x
 
 
-class EBTFinalLayer(nn.Module):
+class PreciousFinalLayer(nn.Module):
     """
     The final layer of the diffusion model.
     """
@@ -674,7 +674,7 @@ class DiT(nn.Module):
         self.apply(_basic_init)
 
 
-class EBTBlock(nn.Module):
+class PreciousBlock(nn.Module):
     def __init__(self,
                  hidden_size,
                  num_heads,
@@ -728,7 +728,7 @@ class EBTBlock(nn.Module):
         return x
 
 
-class EBT(nn.Module):
+class Precious(nn.Module):
     def __init__(
         self,
         dim,
@@ -741,7 +741,7 @@ class EBT(nn.Module):
         super().__init__()
         self.num_heads = heads
         self.layers = nn.ModuleList([
-            EBTBlock(
+            PreciousBlock(
                 hidden_size=dim,
                 num_heads=heads,
                 attn_drop=attn_drop,
@@ -749,7 +749,7 @@ class EBT(nn.Module):
             )
             for _ in range(depth)
         ])
-        self.final_layer = EBTFinalLayer(
+        self.final_layer = PreciousFinalLayer(
             hidden_size=dim,
             out_channels=output_dim,
             drop=proj_drop

@@ -11,4 +11,4 @@ from robomimic.config.hbc_config import HBCConfig
 from robomimic.config.iris_config import IRISConfig
 from robomimic.config.td3_bc_config import TD3_BCConfig
 from robomimic.config.diffusion_policy_config import DiffusionPolicyConfig
-from robomimic.config.ebt_policy_config import EBTPolicyConfig
+from robomimic.config.precious_policy_config import PreciousPolicyConfig

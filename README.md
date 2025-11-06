@@ -6,15 +6,12 @@
   <img width="24.0%" src="docs/images/task_tool_hang.gif">
   <img width="24.0%" src="docs/images/task_square.gif">
   <img width="24.0%" src="docs/images/task_transport.gif">
-  <img width="24.0%" src="docs/images/pusht.gif">
  </p>
 
 ## Introduction
 
-This codebase provides EBT Policy for running the benchmarks used in the paper.
+This codebase provides various policies for running the benchmarks used in the paper.
 This project is forked from the [Robomimic](https://github.com/ARISE-Initiative/robomimic) project,
-with additions including transformer-based Diffusion Policy, the PushT benchmark and a lightweight EBT Policy.
-The larger, multi-task, language-conditioned EBT Policy used for real world deployment is not provided in this code.
 
 [**[Homepage]**](https://robomimic.github.io/) &ensp; [**[Documentation]**](https://robomimic.github.io/docs/introduction/overview.html) &ensp; [**[Study Paper]**](https://arxiv.org/abs/2108.03298) &ensp; [**[Study Website]**](https://robomimic.github.io/study/) &ensp; [**[ARISE Initiative]**](https://github.com/ARISE-Initiative)
 
@@ -22,8 +19,8 @@ The larger, multi-task, language-conditioned EBT Policy used for real world depl
 
 1. Create conda environment
 ```
-conda create -n ebt_policy python=3.8.0
-conda activate ebt_policy
+conda create -n benchmarks python=3.8.0
+conda activate benchmarks
 ```
 
 2. Intall pytorch
@@ -48,23 +45,10 @@ pip install -e .
 ## Reproducing Robomimic Benchmarks
 For downloading the robomimic datasets, please visit the [documentation](https://robomimic.github.io/docs/introduction/getting_started.html).
 
-To train EBT Policy on a robomimic dataset, you can run the below command. Configurations can be altered [here](https://github.com/ZhiChengAIR/ebt_policy_benchmarks/blob/master/robomimic/exps/templates/ebt_policy.json).
+To train policies on a robomimic dataset, you can run the below command. Configurations can be altered [here](https://github.com/ZhiChengAIR/benchmarks/blob/master/robomimic/exps/templates/precious_policy.json).
 
 ```
-python robomimic/scripts/train.py --config robomimic/exps/templates/ebt_policy.json --dataset /home/yiqihuang/Projects/robomimic/datasets/tool_hang/ph/image_v15.hdf5
-```
-
-## Reproducing PushT Benchmark
-For downloading PushT, run the following command:
-```
-wget https://diffusion-policy.cs.columbia.edu/data/training/pusht.zip
-unzip pusht.zip && rm -f pusht.zip
-python robomimic/scripts/conversion/convert_pusht_dataset_to_hdf5.py -i pusht.zarr -o /path/to/dataset.hdf5
-```
-
-To train EBT Policy on the PushT dataset, you can run the below command. Configurations can be altered [here](https://github.com/ZhiChengAIR/ebt_policy_benchmarks/blob/master/robomimic/exps/templates/ebt_policy_pusht.json).
-```
-python robomimic/scripts/train.py --config robomimic/exps/templates/ebt_policy_pusht.json --dataset /path/to/dataset.hdf5
+python robomimic/scripts/train.py --config robomimic/exps/templates/precious_policy.json --dataset /path/to/dataset.hdf5
 ```
 
 ## Docker

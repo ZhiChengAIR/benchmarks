@@ -1,5 +1,5 @@
 """
-Implementation of EBT Policy https://diffusion-policy.cs.columbia.edu/ by Cheng Chi
+Implementation of Precious Policy
 """
 from typing import Callable, Union, Sequence, Optional, List
 import random
@@ -12,7 +12,7 @@ from diffusers.training_utils import EMAModel
 
 import robomimic.models.obs_nets as ObsNets
 from robomimic.models.base_nets import RMSNorm
-import robomimic.models.ebt_policy_nets as EBTNets
+import robomimic.models.precious_policy_nets as PreciousNets
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
@@ -22,7 +22,7 @@ from robomimic.models.schedulers import LangevinDynamicsCosineAnnealingScheduler
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
 
-@register_algo_factory_func("ebt_policy")
+@register_algo_factory_func("precious_policy")
 def algo_config_to_class(algo_config):
     """
     Maps algo config to the BC algo class to instantiate, along with additional algo kwargs.
@@ -34,10 +34,10 @@ def algo_config_to_class(algo_config):
         algo_class: subclass of Algo
         algo_kwargs (dict): dictionary of additional kwargs to pass to algorithm
     """
-    return EBTPolicy, {}
+    return PreciousPolicy, {}
 
 
-class EBTPolicy(PolicyAlgo):
+class PreciousPolicy(PolicyAlgo):
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -56,7 +56,7 @@ class EBTPolicy(PolicyAlgo):
         # replace all BatchNorm with GroupNorm to work with EMA
         # performance will tank if you forget to do this!
         obs_encoder = replace_bn_with_gn(obs_encoder)
-        obs_temporal_encoder = EBTNets.ObsTemporalEncoder(
+        obs_temporal_encoder = PreciousNets.ObsTemporalEncoder(
             input_dim=obs_dim,
             embed_dim=self.algo_config.transformer.embed_dim,
             num_layers=self.algo_config.transformer.num_layers,
@@ -67,7 +67,7 @@ class EBTPolicy(PolicyAlgo):
         )
 
         # create network object
-        energy_pred_net = EBTNets.EBTTransformer(
+        energy_pred_net = PreciousNets.PreciousTransformer(
             input_dim=self.ac_dim,
             cond_dim=self.algo_config.transformer.embed_dim,
             embed_dim=self.algo_config.transformer.embed_dim,
@@ -103,28 +103,30 @@ class EBTPolicy(PolicyAlgo):
         self.obs_queue = None
         self.action_queue = None
 
-        self.scale_alpha_with_energy_temp = self.algo_config.ebt.scale_alpha_with_energy_temp
-        self.randomize_mcmc_num_steps = self.algo_config.ebt.randomize_mcmc_num_steps
-        self.mcmc_step_size = self.algo_config.ebt.mcmc_step_size
+        self.scale_alpha_with_energy_temp = self.algo_config.precious.scale_alpha_with_energy_temp
+        self.randomize_mcmc_num_steps = self.algo_config.precious.randomize_mcmc_num_steps
+        self.mcmc_step_size = self.algo_config.precious.mcmc_step_size
         self.alpha = nn.Parameter(
             torch.tensor(
                 float(self.mcmc_step_size),
                 device=self.device
             ),
-            requires_grad=self.algo_config.ebt.mcmc_step_size_learnable,
+            requires_grad=self.algo_config.precious.mcmc_step_size_learnable,
         )
-        self.clamp_futures_grad = self.algo_config.ebt.clamp_future_grads
-        self.clamp_futures_grad_max_change = self.algo_config.ebt.clamp_futures_grad_max_change
-        self.mcmc_num_steps = self.algo_config.ebt.mcmc_num_steps
-        self.truncate_mcmc = self.algo_config.ebt.truncate_mcmc
+        self.clamp_futures_grad = self.algo_config.precious.clamp_future_grads
+        self.clamp_futures_grad_max_change = self.algo_config.precious.clamp_futures_grad_max_change
+        self.mcmc_num_steps = self.algo_config.precious.mcmc_num_steps
+        self.truncate_mcmc = self.algo_config.precious.truncate_mcmc
         self.ebl_norm = RMSNorm(self.ac_dim)
-        self.randomize_mcmc_step_size_scale = self.algo_config.ebt.randomize_mcmc_step_size_scale
-        self.max_mcmc_steps = self.algo_config.ebt.max_mcmc_steps
-        self.min_grad = self.algo_config.ebt.min_grad
-        self.mu = self.algo_config.ebt.mu
+        self.randomize_mcmc_step_size_scale = self.algo_config.precious.randomize_mcmc_step_size_scale
+        self.max_mcmc_steps = self.algo_config.precious.max_mcmc_steps
+        self.min_grad = self.algo_config.precious.min_grad
+        self.mu = self.algo_config.precious.mu
         self.langevin_dynamics_scheduler = LangevinDynamicsCosineAnnealingScheduler(
-            min_sigma=self.algo_config.ebt.min_sigma,
-            max_sigma=self.algo_config.ebt.max_sigma
+            min_sigma=self.algo_config.precious.min_sigma,
+            max_sigma=self.algo_config.precious.max_sigma,
+            inf_sigma=self.algo_config.precious.inf_sigma,
+            add_inf_ld_noise=self.algo_config.precious.add_inf_ld_noise
         )
 
     def process_batch_for_training(self, batch):
@@ -154,7 +156,7 @@ class EBTPolicy(PolicyAlgo):
             in_range = (-1 <= actions) & (actions <= 1)
             all_in_range = torch.all(in_range).item()
             if not all_in_range:
-                raise ValueError("'actions' must be in range [-1,1] for EBT Policy! Check if hdf5_normalize_action is enabled.")
+                raise ValueError("'actions' must be in range [-1,1] for Precious Policy! Check if hdf5_normalize_action is enabled.")
             self.action_check_done = True
 
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
@@ -179,7 +181,7 @@ class EBTPolicy(PolicyAlgo):
         To = self.algo_config.horizon.observation_horizon
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
-            info = super(EBTPolicy, self).train_on_batch(batch, epoch, validate=validate)
+            info = super(PreciousPolicy, self).train_on_batch(batch, epoch, validate=validate)
             action = batch["actions"]
 
             # encode obs
@@ -226,7 +228,6 @@ class EBTPolicy(PolicyAlgo):
                         mcmc_step=i,
                         num_mcmc_steps=num_mcmc_steps
                     )
-                    pred_grad_norm = pred_grad.norm(dim=(-1, -2)).mean()
                     predicted_traj_list.append(pred_action)
                     predicted_energies_list.append(pred_energy)
 
@@ -244,7 +245,7 @@ class EBTPolicy(PolicyAlgo):
                     net=self.nets,
                     optim=self.optimizers["policy"],
                     loss=loss,
-                    max_grad_norm=1.0
+                    max_grad_norm=1.0,
                 )
 
                 # update Exponential Moving Average of the model weights
@@ -290,18 +291,14 @@ class EBTPolicy(PolicyAlgo):
     ):
         B = trajectory.shape[0]
         trajectory = trajectory.detach().requires_grad_()
+        velocity = velocity.detach()
         trajectory = self.ebl_norm(trajectory)
 
-        if not inference_mode and num_mcmc_steps is not None:
-            trajectory = self.langevin_dynamics_scheduler.apply_noise(
-                mcmc_step=mcmc_step,
-                num_mcmc_steps=num_mcmc_steps,
-                action=trajectory
-            )
-
-        traj_look = self._perform_lookahead(
+        trajectory = self.langevin_dynamics_scheduler.apply_noise(
+            mcmc_step=mcmc_step,
+            num_mcmc_steps=num_mcmc_steps,
             action=trajectory,
-            velocity=velocity
+            inference_mode=inference_mode
         )
 
         traj_look = self._perform_lookahead(
@@ -350,7 +347,7 @@ class EBTPolicy(PolicyAlgo):
         Returns:
             loss_log (dict): name -> summary statistic
         """
-        log = super(EBTPolicy, self).log_info(info)
+        log = super(PreciousPolicy, self).log_info(info)
         log["Loss"] = info["losses"]["l2_loss"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
@@ -513,7 +510,6 @@ class EBTPolicy(PolicyAlgo):
         if self.truncate_mcmc and final_stop:
             predicted_traj_grad = torch.autograd.grad(
                 outputs=energy_pred.sum(),
-                retain_graph=True,
                 inputs=trajectory,
                 create_graph=create_graph
             )[0]
